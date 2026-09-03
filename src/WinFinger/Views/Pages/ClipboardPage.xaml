@@ -10,6 +10,9 @@
         <controls:NullToCollapsedConverter x:Key="NullToCollapsed"/>
         <controls:EnumToVisibilityConverter x:Key="KindVisible"/>
         <controls:BoolToVisibilityConverter x:Key="BoolVisible"/>
+        <controls:ColorStringToBrushConverter x:Key="ColorDot"/>
+        <controls:StringEqualsVisibilityConverter x:Key="StringEqualsVisible"/>
+        <controls:EntryInlineActionsConverter x:Key="InlineActions"/>
     </UserControl.Resources>
 
     <Grid Margin="20,20,20,20">
@@ -17,6 +20,7 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <!-- search + pause + clear (mac top row) -->
@@ -180,10 +184,66 @@
                                        Margin="0,3,0,0" TextTrimming="CharacterEllipsis">
                                 <Run Text="{Binding KindTitle, Mode=OneWay}"/><Run Text=" · "/><Run Text="{Binding DetailLabel, Mode=OneWay}"/><Run Text=" · "/><Run Text="{Binding SourceAppLabel, Mode=OneWay}"/><Run Text=" · "/><Run Text="{Binding CreatedAt, Converter={StaticResource RelativeTime}, Mode=OneWay}"/>
                             </TextBlock>
+
+                            <!-- 内容类型 / 已识字 标签 -->
+                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                <Border CornerRadius="6" Padding="5,1" Background="{DynamicResource Brush.Fill}"
+                                        Visibility="{Binding ContentTypeLabel, Converter={StaticResource NullToCollapsed}}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Ellipse Width="9" Height="9" Margin="0,0,4,0" VerticalAlignment="Center"
+                                                 Fill="{Binding Text, Converter={StaticResource ColorDot}}"
+                                                 Visibility="{Binding ContentType, Converter={StaticResource StringEqualsVisible}, ConverterParameter=color}"/>
+                                        <TextBlock Text="{Binding ContentTypeLabel}" FontSize="9" FontFamily="{StaticResource Font.Text}"
+                                                   Foreground="{DynamicResource Brush.TextSecondary}" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </Border>
+                                <Border CornerRadius="6" Padding="5,1" Margin="5,0,0,0" Background="{DynamicResource Brush.Fill}"
+                                        Visibility="{Binding HasOcrText, Converter={StaticResource BoolVisible}}">
+                                    <TextBlock Text="已识字" FontSize="9" FontFamily="{StaticResource Font.Text}"
+                                               Foreground="{DynamicResource Brush.TextSecondary}"/>
+                                </Border>
+                            </StackPanel>
                         </StackPanel>
 
                         <!-- star / copy / delete -->
                         <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                            <!-- 内联动作：鼠标悬停在卡片上才露出 -->
+                            <ItemsControl ItemsSource="{Binding Converter={StaticResource InlineActions}}" VerticalAlignment="Center">
+                                <ItemsControl.Style>
+                                    <Style TargetType="ItemsControl">
+                                        <Setter Property="Opacity" Value="0"/>
+                                        <Setter Property="IsHitTestVisible" Value="False"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+                                                <Setter Property="Opacity" Value="1"/>
+                                                <Setter Property="IsHitTestVisible" Value="True"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </ItemsControl.Style>
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <StackPanel Orientation="Horizontal"/>
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Button Content="{Binding Glyph}" ToolTip="{Binding Title}" Tag="{Binding}"
+                                                Click="OnInlineAction" Margin="0,0,2,0">
+                                            <Button.Style>
+                                                <Style TargetType="Button" BasedOn="{StaticResource Button.Icon}">
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsGlyphFont}" Value="False">
+                                                            <Setter Property="FontFamily" Value="{StaticResource Font.Text}"/>
+                                                            <Setter Property="FontSize" Value="13"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Button.Style>
+                                        </Button>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
                             <Button Style="{StaticResource Button.Icon}" Click="OnToggleFavorite" Tag="{Binding}">
                                 <Button.ToolTip>
                                     <ToolTip Content="收藏"/>
@@ -203,6 +263,9 @@
                 </DataTemplate>
             </ListBox.ItemTemplate>
         </ListBox>
+
+        <!-- 结果抽屉 -->
+        <controls:ResultDrawer x:Name="Drawer" Grid.Row="3" Margin="0,10,6,0"/>
 
         <!-- empty state -->
         <StackPanel x:Name="EmptyState" Grid.Row="2" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed">

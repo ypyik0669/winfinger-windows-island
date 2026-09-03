@@ -74,6 +74,10 @@ public sealed partial class AppViewModel : ObservableObject
     public PasteService Paste { get; }
     public OcrService Ocr { get; } = new();
     public AiService Ai { get; }
+    public ActionCatalogService Actions { get; }
+
+    /// <summary>动作执行器（结果抽屉挂上来之后才有）。</summary>
+    public ActionExecutor? Executor { get; private set; }
 
     /// <summary>自动 OCR 串行队列（一次只跑一张图，避免 CPU 抖动）。</summary>
     private readonly SemaphoreSlim _autoOcrGate = new(1, 1);
@@ -86,11 +90,16 @@ public sealed partial class AppViewModel : ObservableObject
     /// <summary>Raised by the window layer when Ctrl+N is pressed while the notes page is showing.</summary>
     public event Action? NewNoteRequested;
 
+    /// <summary>请求打开"功能设置"窗口（Task 14 接管；未接管时只提示）。</summary>
+    public event Action? FeatureSettingsRequested;
+
     public AppViewModel()
     {
         ClipboardMonitor = new ClipboardMonitorService(ClipboardStore, ForegroundApp, SettingsStore);
         Paste = new PasteService(ClipboardMonitor, ClipboardStore, FocusRestore, this, Notifications);
         Ai = new AiService(SettingsStore);
+        Actions = new ActionCatalogService(Notifications);
+        ActionCatalogService.Current = Actions;
 
         var settings = SettingsStore.Settings;
         ClipboardMonitor.IsPaused = settings.ClipboardPaused;
@@ -227,9 +236,24 @@ public sealed partial class AppViewModel : ObservableObject
         SettingsStore.Save();
     }
 
+    /// <summary>结果抽屉就绪后挂上来，动作才能把结果显示出去。</summary>
+    public ActionExecutor AttachPresenter(IResultPresenter presenter)
+    {
+        Executor = new ActionExecutor(this, presenter);
+        return Executor;
+    }
+
+    /// <summary>没有订阅者（功能设置窗口还没做）时退化成一条提示。</summary>
+    public void RequestOpenFeatureSettings()
+    {
+        if (FeatureSettingsRequested is { } handler) handler();
+        else Notifications.Post("⚙️", "未配置 AI，请在托盘 → 功能设置 中填写 API Key");
+    }
+
     public void Start()
     {
         StoragePaths.EnsureCreated();
+        Actions.Start();
         Theme.Start(AppearanceStyle);
         Metrics.Start();
         ForegroundApp.Start();
@@ -243,6 +267,7 @@ public sealed partial class AppViewModel : ObservableObject
         _autoOcrCts.Cancel();
         _autoOcrCts.Dispose();
         _autoOcrGate.Dispose();
+        Actions.Stop();
         Theme.Stop();
         Metrics.Stop();
         ForegroundApp.Stop();

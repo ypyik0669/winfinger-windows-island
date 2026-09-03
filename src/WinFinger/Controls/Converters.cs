@@ -175,3 +175,84 @@ public sealed class BoolToVisibilityConverter : IValueConverter
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
         => throw new NotSupportedException();
 }
+
+/// <summary>把 ContentDetector 认出的颜色文本变成色点画刷（认不出时透明）。</summary>
+public sealed class ColorStringToBrushConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object parameter, CultureInfo culture)
+    {
+        if (value is string s && Services.ContentDetector.TryParseColor(s, out var color))
+        {
+            var brush = new SolidColorBrush(color);
+            brush.Freeze();
+            return brush;
+        }
+        return Brushes.Transparent;
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}
+
+/// <summary>卡片上一个内联动作按钮的数据（动作 + 它作用的条目）。</summary>
+public sealed record InlineActionItem(Models.ActionDefinition Definition, Models.ClipboardEntry Entry)
+{
+    public string Title => Definition.Title;
+
+    /// <summary>Icon 是 4 位十六进制时当 Segoe 字形，否则原样当文字 / emoji。</summary>
+    public string Glyph => ActionGlyph.Text(Definition.Icon);
+
+    public bool IsGlyphFont => ActionGlyph.IsGlyph(Definition.Icon);
+}
+
+/// <summary>动作图标解析：4 位十六进制码 → Segoe 字形，其余原样。</summary>
+public static class ActionGlyph
+{
+    public static bool IsGlyph(string? icon) =>
+        icon is { Length: 4 } && icon.All(Uri.IsHexDigit);
+
+    public static string Text(string? icon)
+    {
+        if (string.IsNullOrEmpty(icon)) return ""; // More
+        if (!IsGlyph(icon)) return icon!;
+        return char.ConvertFromUtf32(int.Parse(icon!, NumberStyles.HexNumber, CultureInfo.InvariantCulture));
+    }
+}
+
+/// <summary>条目 → 最多 3 个内联动作（卡片第三列的图标按钮）。</summary>
+public sealed class EntryInlineActionsConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object parameter, CultureInfo culture)
+    {
+        if (value is not Models.ClipboardEntry entry) return Array.Empty<InlineActionItem>();
+        var catalog = Services.ActionCatalogService.Current;
+        if (catalog is null) return Array.Empty<InlineActionItem>();
+        try
+        {
+            return catalog.For(entry)
+                .Where(d => d.Inline)
+                .Take(3)
+                .Select(d => new InlineActionItem(d, entry))
+                .ToList();
+        }
+        catch
+        {
+            return Array.Empty<InlineActionItem>();
+        }
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}
+
+/// <summary>字符串等于参数时 Visible（大小写不敏感），否则 Collapsed。</summary>
+public sealed class StringEqualsVisibilityConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object parameter, CultureInfo culture)
+        => string.Equals(value as string, parameter as string, StringComparison.OrdinalIgnoreCase)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}

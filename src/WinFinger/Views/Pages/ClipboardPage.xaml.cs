@@ -41,8 +41,15 @@ public partial class ClipboardPage : UserControl, IIslandPage
         _relativeTimer.Tick += (_, _) => RefreshRelativeTimes();
         IsVisibleChanged += (_, e) =>
         {
-            if (e.NewValue is true) _relativeTimer.Start();
-            else _relativeTimer.Stop();
+            if (e.NewValue is true)
+            {
+                _relativeTimer.Start();
+            }
+            else
+            {
+                _relativeTimer.Stop();
+                Drawer.Close(); // 页面藏起来时结束流式输出
+            }
         };
     }
 
@@ -111,6 +118,16 @@ public partial class ClipboardPage : UserControl, IIslandPage
         WireFilter(FilterFile, ClipboardFilter.File);
         WireFilter(FilterFavorite, ClipboardFilter.Favorite);
 
+        // 动作框架：抽屉 → 执行器 → 右键菜单扩展点
+        Services.ActionCatalogService.Current = model.Actions;
+        Drawer.Attach(model);
+        model.AttachPresenter(Drawer);
+        if (!model.EntryActionProviders.OfType<Services.CatalogActionProvider>().Any())
+            model.EntryActionProviders.Add(new Services.CatalogActionProvider(model.Actions, () => model.Executor));
+        model.Actions.Changed += () => Dispatcher.BeginInvoke(new Action(RefreshFilter));
+        // OCR / 内容类型变了，卡片上的标签与内联动作要跟着换
+        model.ClipboardStore.EntryChanged += _ => Dispatcher.BeginInvoke(new Action(() => _view?.Refresh()));
+
         model.ClipboardStore.Entries.CollectionChanged += OnEntriesChanged;
         model.ClipboardStore.FavoriteChanged += _ => RefreshFilter();
         RefreshPauseButton();
@@ -132,6 +149,12 @@ public partial class ClipboardPage : UserControl, IIslandPage
         if (EditPopup.IsOpen)
         {
             CloseEdit();
+            return true;
+        }
+        if (Drawer.IsOpen)
+        {
+            Drawer.Close();
+            FocusSearch();
             return true;
         }
         if (SearchBox.Text.Length > 0)
@@ -327,26 +350,26 @@ public partial class ClipboardPage : UserControl, IIslandPage
         bool isFile = entry.Kind == ClipboardEntryKind.File;
         bool isImage = entry.Kind == ClipboardEntryKind.Image;
 
-        Add(menu, "粘贴", "\uE77F", () =>
+        Add(menu.Items, "粘贴", "\uE77F", () =>
         {
             if (selection.Count > 1) _ = model.Paste.PasteManyAsync(selection);
             else _ = model.Paste.PasteAsync(entry);
         });
-        Add(menu, "仅复制", "\uE8C8", () =>
+        Add(menu.Items, "仅复制", "\uE8C8", () =>
         {
             if (selection.Count > 1) model.Paste.CopyMany(selection);
             else model.Paste.CopyOnly(entry);
         });
-        if (isText) Add(menu, "粘贴为纯文本", "\uE8D2", () => _ = model.Paste.PasteAsync(entry, new Services.PasteOptions(Plain: true)));
-        Add(menu, entry.IsFavorite ? "取消收藏" : "收藏", entry.IsFavorite ? "\uE735" : "\uE734",
+        if (isText) Add(menu.Items, "粘贴为纯文本", "\uE8D2", () => _ = model.Paste.PasteAsync(entry, new Services.PasteOptions(Plain: true)));
+        Add(menu.Items, entry.IsFavorite ? "取消收藏" : "收藏", entry.IsFavorite ? "\uE735" : "\uE734",
             () => model.ClipboardStore.ToggleFavorite(entry));
-        if (isText) Add(menu, "编辑文本…", "\uE70F", () => OpenEdit(entry));
+        if (isText) Add(menu.Items, "编辑文本…", "\uE70F", () => OpenEdit(entry));
         if (isFile)
         {
-            Add(menu, "打开所在文件夹", "\uE838", () => RevealInExplorer(entry));
-            Add(menu, "复制路径", "\uE71B", () => model.ClipboardMonitor.CopyText(string.Join(Environment.NewLine, entry.FilePaths)));
+            Add(menu.Items, "打开所在文件夹", "\uE838", () => RevealInExplorer(entry));
+            Add(menu.Items, "复制路径", "\uE71B", () => model.ClipboardMonitor.CopyText(string.Join(Environment.NewLine, entry.FilePaths)));
         }
-        if (isImage) Add(menu, "图片另存为…", "\uE792", () => SaveImageAs(entry));
+        if (isImage) Add(menu.Items, "图片另存为…", "\uE792", () => SaveImageAs(entry));
 
         // 扩展点：OCR / AI 等能力挂上来的动作
         var extras = model.EntryActionProviders
@@ -365,26 +388,37 @@ public partial class ClipboardPage : UserControl, IIslandPage
         if (extras.Count > 0)
         {
             menu.Items.Add(new Separator());
-            foreach (var action in extras)
+            foreach (var group in extras.GroupBy(a => a.Group))
             {
-                var captured = action;
-                Add(menu, captured.Header, captured.Icon, () =>
+                ItemCollection target = menu.Items;
+                if (group.Key is { Length: > 0 } groupName)
                 {
-                    try { captured.Execute(entry); }
-                    catch { /* 扩展动作不能拖垮菜单 */ }
-                }, captured.IsDanger);
+                    var sub = new MenuItem { Header = groupName, Style = (Style)FindResource("MenuItem.Flat") };
+                    menu.Items.Add(sub);
+                    target = sub.Items;
+                }
+                foreach (var action in group)
+                {
+                    var captured = action;
+                    Add(target, captured.Header, captured.Icon, () =>
+                    {
+                        try { captured.Execute(entry); }
+                        catch { /* 扩展动作不能拖垮菜单 */ }
+                    }, captured.IsDanger);
+                }
             }
+            Add(menu.Items, "自定义动作…（打开 actions.json）", "", RevealActionsFile);
         }
 
         menu.Items.Add(new Separator());
-        Add(menu, selection.Count > 1 ? $"删除 {selection.Count} 条" : "删除", "\uE711", () =>
+        Add(menu.Items, selection.Count > 1 ? $"删除 {selection.Count} 条" : "删除", "\uE711", () =>
         {
             foreach (var item in selection.Count > 1 ? selection : new List<ClipboardEntry> { entry })
                 model.ClipboardStore.Remove(item);
         }, danger: true);
     }
 
-    private void Add(ContextMenu menu, string header, string? glyph, Action execute, bool danger = false)
+    private void Add(ItemCollection items, string header, string? glyph, Action execute, bool danger = false)
     {
         var brush = danger ? "Brush.Danger" : "Brush.TextPrimary";
         var panel = new StackPanel { Orientation = Orientation.Horizontal };
@@ -407,7 +441,33 @@ public partial class ClipboardPage : UserControl, IIslandPage
 
         var menuItem = new MenuItem { Header = panel, Style = (Style)FindResource("MenuItem.Flat") };
         menuItem.Click += (_, _) => execute();
-        menu.Items.Add(menuItem);
+        items.Add(menuItem);
+    }
+
+    /// <summary>卡片上的内联动作按钮：吃掉点击，别让整行去粘贴。</summary>
+    private void OnInlineAction(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        _pressedEntry = null;
+        if (_model?.Executor is null) return;
+        if (((FrameworkElement)sender).Tag is not Controls.InlineActionItem item) return;
+        _ = _model.Executor.RunAsync(item.Definition, item.Entry);
+    }
+
+    /// <summary>在资源管理器里定位用户的 actions.json。</summary>
+    private void RevealActionsFile()
+    {
+        if (_model is null) return;
+        try
+        {
+            string path = _model.Actions.ActionsPath;
+            if (File.Exists(path)) Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true });
+            else Process.Start(new ProcessStartInfo("explorer.exe", $"\"{Services.StoragePaths.Root}\"") { UseShellExecute = true });
+        }
+        catch
+        {
+            _model.Notifications.Post("⚙️", "打开 actions.json 失败");
+        }
     }
 
     private void RevealInExplorer(ClipboardEntry entry)
