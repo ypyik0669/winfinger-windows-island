@@ -51,7 +51,7 @@ public partial class ClipboardPage : UserControl, IIslandPage
                 RefreshEmptyState();
             }
         };
-        ClearButton.Click += (_, _) => model.ClipboardStore.Clear();
+        ClearButton.Click += (_, _) => model.ClipboardStore.Clear(includeFavorites: false);
         ClearSearchButton.Click += (_, _) => SearchBox.Text = "";
         SearchBox.TextChanged += (_, _) =>
         {

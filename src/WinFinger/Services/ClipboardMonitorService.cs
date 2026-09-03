@@ -22,6 +22,9 @@ public sealed partial class ClipboardMonitorService : ObservableObject
     private string? _ignoreHash;      // content we just wrote back ourselves
     private DateTime _suppressUntil;  // belt-and-braces time window
 
+    /// <summary>Raised once per successful capture (new entry or a duplicate touch) so the UI can toast.</summary>
+    public event Action<ClipboardEntry>? Captured;
+
     public ClipboardMonitorService(ClipboardStore store)
     {
         _store = store;
@@ -122,7 +125,8 @@ public sealed partial class ClipboardMonitorService : ObservableObject
                 {
                     var hash = ClipboardStore.FileHash(paths.Select(p => Path.GetFullPath(p)));
                     if (ShouldIgnore(hash)) return;
-                    _store.AppendFiles(paths, sourceName, sourceId);
+                    var captured = _store.AppendFiles(paths, sourceName, sourceId);
+                    if (captured is not null) Captured?.Invoke(captured);
                     return;
                 }
             }
@@ -142,7 +146,8 @@ public sealed partial class ClipboardMonitorService : ObservableObject
                 var png = stream.ToArray();
                 var hash = ClipboardStore.Hash(png);
                 if (ShouldIgnore(hash)) return;
-                _store.AppendImage(png, sourceName, sourceId);
+                var captured = _store.AppendImage(png, sourceName, sourceId);
+                if (captured is not null) Captured?.Invoke(captured);
                 return;
             }
 
@@ -156,7 +161,8 @@ public sealed partial class ClipboardMonitorService : ObservableObject
             {
                 var hash = ClipboardStore.Hash(Encoding.UTF8.GetBytes(text));
                 if (ShouldIgnore(hash)) return;
-                _store.AppendText(text, sourceName, sourceId);
+                var captured = _store.AppendText(text, sourceName, sourceId);
+                if (captured is not null) Captured?.Invoke(captured);
             }
         }
         catch

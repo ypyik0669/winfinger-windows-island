@@ -120,20 +120,16 @@ public sealed partial class AppViewModel : ObservableObject
             Notifications.Post("🍅", phase == Services.PomodoroPhase.Focus ? "专注结束，休息一下" : "休息结束，开始专注");
             System.Media.SystemSounds.Asterisk.Play();
         };
-        ClipboardStore.Entries.CollectionChanged += (_, e) =>
+        ClipboardMonitor.Captured += entry =>
         {
-            if (e.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Add && !IsExpanded)
+            if (IsExpanded) return;
+            var preview = entry.Kind switch
             {
-                var entry = ClipboardStore.Entries.FirstOrDefault();
-                if (entry is null) return;
-                var preview = entry.Kind switch
-                {
-                    Models.ClipboardEntryKind.Image => "已记录图片",
-                    Models.ClipboardEntryKind.File => entry.DisplayTitle,
-                    _ => Truncate(entry.Text ?? "", 24)
-                };
-                Notifications.Post("📋", preview);
-            }
+                Models.ClipboardEntryKind.Image => "已记录图片",
+                Models.ClipboardEntryKind.File => entry.DisplayTitle,
+                _ => Truncate(entry.Text ?? "", 24)
+            };
+            Notifications.Post("📋", preview);
         };
     }
 

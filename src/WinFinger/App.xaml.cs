@@ -81,6 +81,7 @@ public partial class App : Application
         _trayIcon?.Dispose();
         if (_ownsMutex)
         {
+            try { Model.ClipboardStore.SaveNow(); } catch (Exception ex) { LogCrash(ex); }
             try { Model.Stop(); } catch (Exception ex) { LogCrash(ex); }
             try { _singleInstanceMutex?.ReleaseMutex(); } catch (ApplicationException) { }
         }
@@ -143,7 +144,7 @@ public partial class App : Application
         menu.Items.Add(pauseItem);
 
         var clearItem = new System.Windows.Controls.MenuItem { Header = "清空剪贴板历史" };
-        clearItem.Click += (_, _) => Model.ClipboardStore.Clear();
+        clearItem.Click += (_, _) => Model.ClipboardStore.Clear(includeFavorites: false);
         menu.Items.Add(clearItem);
 
         var bgMenu = new System.Windows.Controls.MenuItem { Header = "岛背景" };

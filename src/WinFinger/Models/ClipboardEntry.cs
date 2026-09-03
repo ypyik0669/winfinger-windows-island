@@ -60,16 +60,46 @@ public static class ClipboardFilterInfo
 public sealed class ClipboardEntry : INotifyPropertyChanged
 {
     private bool _isFavorite;
+    private string? _text;
+    private DateTime _createdAt = DateTime.Now;
 
     [JsonPropertyName("id")] public Guid Id { get; set; } = Guid.NewGuid();
     [JsonPropertyName("kind")] public ClipboardEntryKind Kind { get; set; }
-    [JsonPropertyName("text")] public string? Text { get; set; }
     [JsonPropertyName("imagePath")] public string? ImagePath { get; set; }
     [JsonPropertyName("filePaths")] public List<string> FilePaths { get; set; } = new();
     [JsonPropertyName("sourceAppBundleId")] public string? SourceAppBundleId { get; set; }
     [JsonPropertyName("sourceAppName")] public string? SourceAppName { get; set; }
-    [JsonPropertyName("createdAt")] public DateTime CreatedAt { get; set; } = DateTime.Now;
     [JsonPropertyName("contentHash")] public string ContentHash { get; set; } = "";
+
+    /// <summary>文本内容是否被截断保存（超长文本场景，Task 4/5 使用）。</summary>
+    [JsonPropertyName("truncated")] public bool IsTruncated { get; set; }
+
+    [JsonPropertyName("text")]
+    public string? Text
+    {
+        get => _text;
+        set
+        {
+            if (_text == value) return;
+            _text = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Text)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DisplayTitle)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DetailLabel)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CharacterCount)));
+        }
+    }
+
+    [JsonPropertyName("createdAt")]
+    public DateTime CreatedAt
+    {
+        get => _createdAt;
+        set
+        {
+            if (_createdAt == value) return;
+            _createdAt = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CreatedAt)));
+        }
+    }
 
     [JsonPropertyName("isFavorite")]
     public bool IsFavorite
@@ -82,6 +112,10 @@ public sealed class ClipboardEntry : INotifyPropertyChanged
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsFavorite)));
         }
     }
+
+    /// <summary>相对时间显示（如"3 分钟前"）需要定时刷新时调用：CreatedAt 值未变，但显示要重算。</summary>
+    public void RaiseCreatedAtChanged() =>
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CreatedAt)));
 
     public ClipboardEntry()
     {
@@ -122,11 +156,11 @@ public sealed class ClipboardEntry : INotifyPropertyChanged
         _ => ""
     };
 
-    /// <summary>mac detailLabel.</summary>
+    /// <summary>mac detailLabel（截断文本追加"（已截断）"）。</summary>
     [JsonIgnore]
     public string DetailLabel => Kind switch
     {
-        ClipboardEntryKind.Text => $"{CharacterCount} 字符",
+        ClipboardEntryKind.Text => IsTruncated ? $"{CharacterCount} 字符（已截断）" : $"{CharacterCount} 字符",
         ClipboardEntryKind.Image => "图片",
         ClipboardEntryKind.File => FilePaths.Count == 1 ? "1 个文件" : $"{FilePaths.Count} 个文件",
         _ => ""
@@ -137,6 +171,10 @@ public sealed class ClipboardEntry : INotifyPropertyChanged
     [JsonIgnore] public string SourceAppLabel => string.IsNullOrWhiteSpace(SourceAppName) ? "未知应用" : SourceAppName!;
 
     [JsonIgnore] public string? FirstFilePath => FilePaths.Count > 0 ? FilePaths[0] : null;
+
+    /// <summary>单个文件类条目且指向的是目录（mac isDirectory）。</summary>
+    [JsonIgnore]
+    public bool IsDirectory => Kind == ClipboardEntryKind.File && FilePaths.Count == 1 && Directory.Exists(FilePaths[0]);
 
     public event PropertyChangedEventHandler? PropertyChanged;
 }

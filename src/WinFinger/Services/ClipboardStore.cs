@@ -3,6 +3,8 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Threading.Tasks;
+using System.Windows.Threading;
 using WinFinger.Models;
 
 namespace WinFinger.Services;
@@ -18,32 +20,59 @@ public sealed class ClipboardStore
     /// <summary>Raised after an entry's favourite flag flips (the list filter must re-evaluate).</summary>
     public event Action<ClipboardEntry>? FavoriteChanged;
 
+    /// <summary>Raised after an entry is created or touched (moved to front on a duplicate hit) and persisted.</summary>
+    public event Action<ClipboardEntry>? EntryChanged;
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true
     };
 
+    private readonly DispatcherTimer _saveTimer;
+
     public ClipboardStore()
     {
+        // 300ms 去抖：连续多次修改只落盘一次（构造函数在 UI 线程调用，DispatcherTimer 可安全创建）。
+        _saveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
+        _saveTimer.Tick += (_, _) =>
+        {
+            _saveTimer.Stop();
+            _ = FlushAsync();
+        };
         Load();
     }
 
-    public void AppendText(string text, string? sourceApp, string? sourceAppId = null)
+    public ClipboardEntry? AppendText(string text, string? sourceApp, string? sourceAppId = null, bool truncated = false)
     {
-        if (string.IsNullOrEmpty(text)) return;
+        if (string.IsNullOrEmpty(text)) return null;
         var hash = Hash(Encoding.UTF8.GetBytes(text));
-        if (Entries.Any(e => e.ContentHash == hash)) return;
+        var existing = Entries.FirstOrDefault(e => e.ContentHash == hash);
+        if (existing is not null)
+        {
+            Touch(existing);
+            return existing;
+        }
 
-        Entries.Insert(0, new ClipboardEntry(Guid.NewGuid(), ClipboardEntryKind.Text, text,
-            null, sourceAppId, sourceApp, DateTime.Now, hash));
+        var entry = new ClipboardEntry(Guid.NewGuid(), ClipboardEntryKind.Text, text,
+            null, sourceAppId, sourceApp, DateTime.Now, hash)
+        {
+            IsTruncated = truncated
+        };
+        Entries.Insert(0, entry);
         TrimAndSave();
+        return entry;
     }
 
-    public void AppendImage(byte[] pngData, string? sourceApp, string? sourceAppId = null)
+    public ClipboardEntry? AppendImage(byte[] pngData, string? sourceApp, string? sourceAppId = null)
     {
-        if (pngData.Length == 0 || pngData.Length > MaxImageBytes) return;
+        if (pngData.Length == 0 || pngData.Length > MaxImageBytes) return null;
         var hash = Hash(pngData);
-        if (Entries.Any(e => e.ContentHash == hash)) return;
+        var existing = Entries.FirstOrDefault(e => e.ContentHash == hash);
+        if (existing is not null)
+        {
+            Touch(existing);
+            return existing;
+        }
 
         var id = Guid.NewGuid();
         var path = Path.Combine(StoragePaths.ClipboardMedia, $"{id}.png");
@@ -53,16 +82,18 @@ public sealed class ClipboardStore
         }
         catch
         {
-            return;
+            return null;
         }
 
-        Entries.Insert(0, new ClipboardEntry(id, ClipboardEntryKind.Image, null,
-            path, sourceAppId, sourceApp, DateTime.Now, hash));
+        var entry = new ClipboardEntry(id, ClipboardEntryKind.Image, null,
+            path, sourceAppId, sourceApp, DateTime.Now, hash);
+        Entries.Insert(0, entry);
         TrimAndSave();
+        return entry;
     }
 
     /// <summary>mac appendFiles: dedupes on the joined path list.</summary>
-    public void AppendFiles(IEnumerable<string> paths, string? sourceApp, string? sourceAppId = null)
+    public ClipboardEntry? AppendFiles(IEnumerable<string> paths, string? sourceApp, string? sourceAppId = null)
     {
         var normalized = paths
             .Where(p => !string.IsNullOrWhiteSpace(p))
@@ -72,9 +103,14 @@ public sealed class ClipboardStore
                 catch { return p; }
             })
             .ToList();
-        if (normalized.Count == 0) return;
+        if (normalized.Count == 0) return null;
         var hash = FileHash(normalized);
-        if (Entries.Any(e => e.ContentHash == hash)) return;
+        var existing = Entries.FirstOrDefault(e => e.ContentHash == hash);
+        if (existing is not null)
+        {
+            Touch(existing);
+            return existing;
+        }
 
         var entry = new ClipboardEntry(Guid.NewGuid(), ClipboardEntryKind.File, null, null,
             sourceAppId, sourceApp, DateTime.Now, hash)
@@ -83,10 +119,31 @@ public sealed class ClipboardStore
         };
         Entries.Insert(0, entry);
         TrimAndSave();
+        return entry;
     }
 
     public static string FileHash(IEnumerable<string> paths) =>
         Hash(Encoding.UTF8.GetBytes(string.Join("\n", paths)));
+
+    /// <summary>命中去重哈希时调用：移到最前、刷新时间戳，但不走 Insert/Clear（Move 不触发 Add 通知，不会重复弹 toast）。</summary>
+    public void Touch(ClipboardEntry entry)
+    {
+        var index = Entries.IndexOf(entry);
+        if (index > 0)
+            Entries.Move(index, 0);
+        entry.CreatedAt = DateTime.Now;
+        Save();
+        EntryChanged?.Invoke(entry);
+    }
+
+    /// <summary>重算内容哈希后覆盖文本（如 OCR 结果回填），并广播变更。</summary>
+    public void UpdateText(ClipboardEntry entry, string newText)
+    {
+        entry.Text = newText;
+        entry.ContentHash = Hash(Encoding.UTF8.GetBytes(newText));
+        Save();
+        EntryChanged?.Invoke(entry);
+    }
 
     public void ToggleFavorite(ClipboardEntry entry)
     {
@@ -102,11 +159,16 @@ public sealed class ClipboardStore
         Save();
     }
 
-    public void Clear()
+    /// <summary>清空历史；includeFavorites=false 时保留收藏项。反向 RemoveAt 逐条删除（含 PNG），不用 Entries.Clear()。</summary>
+    public void Clear(bool includeFavorites)
     {
-        foreach (var entry in Entries)
+        for (int i = Entries.Count - 1; i >= 0; i--)
+        {
+            var entry = Entries[i];
+            if (!includeFavorites && entry.IsFavorite) continue;
             DeleteImageFile(entry);
-        Entries.Clear();
+            Entries.RemoveAt(i);
+        }
         Save();
     }
 
@@ -162,26 +224,17 @@ public sealed class ClipboardStore
         }
     }
 
-    /// <summary>mac trim: keep the newest 100 but re-insert favourites from the overflow at the front.</summary>
+    /// <summary>mac trim: 收藏项不占配额；非收藏数量超过上限时从队尾删除最旧的非收藏项（含 PNG）。</summary>
     private void TrimAndSave()
     {
-        if (Entries.Count > MaxEntries)
+        int nonFavoriteCount = Entries.Count(e => !e.IsFavorite);
+        for (int i = Entries.Count - 1; i >= 0 && nonFavoriteCount > MaxEntries; i--)
         {
-            var all = Entries.ToList();
-            var keep = all.Take(MaxEntries).ToList();
-            var overflow = all.Skip(MaxEntries).ToList();
-            foreach (var favorite in Enumerable.Reverse(overflow.Where(e => e.IsFavorite).ToList()))
-            {
-                if (keep.All(e => e.Id != favorite.Id))
-                    keep.Insert(0, favorite);
-            }
-            keep = keep.Take(MaxEntries).ToList();
-            var keepIds = keep.Select(e => e.Id).ToHashSet();
-            foreach (var removed in all.Where(e => !keepIds.Contains(e.Id)))
-                DeleteImageFile(removed);
-
-            Entries.Clear();
-            foreach (var entry in keep) Entries.Add(entry);
+            var entry = Entries[i];
+            if (entry.IsFavorite) continue;
+            DeleteImageFile(entry);
+            Entries.RemoveAt(i);
+            nonFavoriteCount--;
         }
         Save();
     }
@@ -212,19 +265,35 @@ public sealed class ClipboardStore
         }
     }
 
-    private void Save()
+    /// <summary>300ms 去抖：连续多次改动只在计时器到期后落盘一次。</summary>
+    public void Save()
     {
-        try
+        _saveTimer.Stop();
+        _saveTimer.Start();
+    }
+
+    /// <summary>立即同步落盘（App.OnExit 调用，确保进程退出前数据不丢）：停掉去抖计时器，快照当前条目后在后台线程写盘并等待完成。</summary>
+    public void SaveNow()
+    {
+        _saveTimer.Stop();
+        FlushAsync().GetAwaiter().GetResult();
+    }
+
+    private Task FlushAsync()
+    {
+        var snapshot = Entries.ToList();
+        return Task.Run(() =>
         {
-            StoragePaths.EnsureCreated();
-            var tmp = StoragePaths.ClipboardJson + ".tmp";
-            File.WriteAllText(tmp, JsonSerializer.Serialize(Entries.ToList(), JsonOptions));
-            File.Move(tmp, StoragePaths.ClipboardJson, overwrite: true);
-        }
-        catch
-        {
-            // best effort
-        }
+            try
+            {
+                StoragePaths.EnsureCreated();
+                AtomicJson.Write(StoragePaths.ClipboardJson, snapshot, JsonOptions);
+            }
+            catch
+            {
+                // best effort
+            }
+        });
     }
 
     public static string Hash(byte[] data) => Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant();
