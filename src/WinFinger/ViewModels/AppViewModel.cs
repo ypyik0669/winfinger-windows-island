@@ -72,6 +72,11 @@ public sealed partial class AppViewModel : ObservableObject
     public FocusRestoreService FocusRestore { get; } = new();
     public HotkeyService Hotkeys { get; } = new();
     public PasteService Paste { get; }
+    public OcrService Ocr { get; } = new();
+
+    /// <summary>自动 OCR 串行队列（一次只跑一张图，避免 CPU 抖动）。</summary>
+    private readonly SemaphoreSlim _autoOcrGate = new(1, 1);
+    private readonly CancellationTokenSource _autoOcrCts = new();
 
     /// <summary>剪贴板条目动作扩展点：OCR / AI 等能力在这里注册自己的菜单项。</summary>
     public ObservableCollection<IEntryActionProvider> EntryActionProviders { get; } = new();
@@ -140,6 +145,45 @@ public sealed partial class AppViewModel : ObservableObject
             };
             Notifications.Post("📋", preview);
         };
+        ClipboardMonitor.Captured += entry =>
+        {
+            // 自动 OCR 默认关闭（CPU / 隐私），开启后新图片串行排队识别
+            if (!SettingsStore.Settings.OcrAutoOnNewImage) return;
+            if (entry.Kind != Models.ClipboardEntryKind.Image) return;
+            if (entry.OcrText is not null) return;
+            _ = QueueAutoOcrAsync(entry);
+        };
+    }
+
+    private async Task QueueAutoOcrAsync(Models.ClipboardEntry entry)
+    {
+        var token = _autoOcrCts.Token;
+        try
+        {
+            await _autoOcrGate.WaitAsync(token);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        try
+        {
+            await Task.Delay(200, token); // 连续复制时防抖
+            if (entry.OcrText is not null) return;
+            await Ocr.RecognizeEntryAsync(entry, ClipboardStore, SettingsStore.Settings.OcrLanguage, token);
+        }
+        catch (OperationCanceledException)
+        {
+            // 退出中
+        }
+        catch
+        {
+            // 自动识别失败静默忽略，用户仍可手动触发
+        }
+        finally
+        {
+            _autoOcrGate.Release();
+        }
     }
 
     partial void OnAppearanceStyleChanged(string value)
@@ -179,6 +223,7 @@ public sealed partial class AppViewModel : ObservableObject
 
     public void Stop()
     {
+        _autoOcrCts.Cancel();
         Theme.Stop();
         Metrics.Stop();
         ForegroundApp.Stop();
