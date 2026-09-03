@@ -135,6 +135,9 @@ internal static class NativeMethods
     public const uint SWP_NOACTIVATE = 0x0010;
     public const uint SWP_NOSIZE = 0x0001;
     public const uint SWP_NOZORDER = 0x0004;
+    public const uint SWP_SHOWWINDOW = 0x0040;
+
+    public static readonly IntPtr HWND_TOPMOST = new(-1);
 
     public const int WM_NCHITTEST = 0x0084;
     public const int HTTRANSPARENT = -1;

@@ -35,15 +35,7 @@ internal sealed class LiveGlassCapture : IDisposable
     {
         IntPtr screen = NativeMethods.GetDC(IntPtr.Zero);
         _memDc = NativeMethods.CreateCompatibleDC(screen);
-        var bmi = new NativeMethods.BITMAPINFOHEADER
-        {
-            biSize = Marshal.SizeOf<NativeMethods.BITMAPINFOHEADER>(),
-            biWidth = W,
-            biHeight = -H, // top-down
-            biPlanes = 1,
-            biBitCount = 32
-        };
-        _dib = NativeMethods.CreateDIBSection(_memDc, ref bmi, 0, out _bits, IntPtr.Zero, 0);
+        _dib = GdiCapture.CreateBgraDib(_memDc, W, H, out _bits);
         _oldSel = NativeMethods.SelectObject(_memDc, _dib);
         NativeMethods.SetStretchBltMode(_memDc, NativeMethods.HALFTONE);
         NativeMethods.ReleaseDC(IntPtr.Zero, screen);
@@ -122,10 +114,8 @@ internal sealed class LiveGlassCapture : IDisposable
     {
         try
         {
-            var enc = new PngBitmapEncoder();
-            enc.Frames.Add(BitmapFrame.Create(Bitmap.Clone()));
-            using var fs = File.Create(Path.Combine(Path.GetTempPath(), "winfinger-glass-dump.png"));
-            enc.Save(fs);
+            File.WriteAllBytes(Path.Combine(Path.GetTempPath(), "winfinger-glass-dump.png"),
+                GdiCapture.EncodePng(Bitmap.Clone()));
         }
         catch
         {
