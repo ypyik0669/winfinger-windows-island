@@ -73,7 +73,7 @@ public sealed partial class AppViewModel : ObservableObject
 
     public AppViewModel()
     {
-        ClipboardMonitor = new ClipboardMonitorService(ClipboardStore);
+        ClipboardMonitor = new ClipboardMonitorService(ClipboardStore, ForegroundApp, SettingsStore);
 
         var settings = SettingsStore.Settings;
         ClipboardMonitor.IsPaused = settings.ClipboardPaused;
