@@ -139,7 +139,8 @@ public sealed class PasteService
     /// <summary>剪贴板已就绪，剩下的收起 / 还原前台 / 注入按键流程。</summary>
     private async Task<bool> PasteCurrentClipboardAsync(bool collapseFirst)
     {
-        if (collapseFirst) _model.Collapse();
+        // 收起时不还原焦点，交给下面这次带等待的 RestoreAndWaitAsync，避免抢两次前台
+        if (collapseFirst) _model.CollapseWithoutFocusRestore();
 
         if (!await _focus.RestoreAndWaitAsync(400).ConfigureAwait(true))
         {

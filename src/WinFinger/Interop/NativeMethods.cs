@@ -367,6 +367,7 @@ internal static class NativeMethods
 
     // ── SendInput（合成键盘/鼠标事件，用于 Ctrl+V 注入）──
     public const int INPUT_KEYBOARD = 1;
+    public const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
     public const uint KEYEVENTF_KEYUP = 0x0002;
     public const uint KEYEVENTF_SCANCODE = 0x0008;
     public const int VK_CONTROL = 0x11;
@@ -375,6 +376,13 @@ internal static class NativeMethods
     public const int VK_LWIN = 0x5B;
     public const int VK_RWIN = 0x5C;
     public const int VK_V = 0x56;
+    // 左右分身：GetAsyncKeyState 要按具体键查，抬起时也必须发对应的键
+    public const int VK_LSHIFT = 0xA0;
+    public const int VK_RSHIFT = 0xA1;
+    public const int VK_LCONTROL = 0xA2;
+    public const int VK_RCONTROL = 0xA3;
+    public const int VK_LMENU = 0xA4;
+    public const int VK_RMENU = 0xA5;
 
     [StructLayout(LayoutKind.Sequential)]
     public struct KEYBDINPUT

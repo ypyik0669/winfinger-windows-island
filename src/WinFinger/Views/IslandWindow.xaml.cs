@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
@@ -871,6 +871,7 @@ public partial class IslandWindow : Window
             NotificationView.Opacity = 0;
         }
         // 必须在岛拿到焦点之前记住上一个前台窗口，否则记到的是我们自己
+        _model.RestoreFocusOnCollapse = true;
         _model.FocusRestore.Remember(_model.ForegroundApp.Hwnd);
         SetNoActivate(false);
         Activate();
@@ -927,7 +928,9 @@ public partial class IslandWindow : Window
     {
         RemoveMouseHook();
         SetNoActivate(true);
-        _model.FocusRestore.Restore();
+        // 用户点到别的窗口 / 粘贴流程自己抢前台时不要再抢回去
+        if (_model.RestoreFocusOnCollapse) _model.FocusRestore.Restore();
+        _model.RestoreFocusOnCollapse = true;
         ResizeLeft.Visibility = Visibility.Collapsed;
         ResizeRight.Visibility = Visibility.Collapsed;
         StopAccentBorder();
@@ -1086,7 +1089,11 @@ public partial class IslandWindow : Window
                     var bottomRight = IslandBorder.PointToScreen(new Point(IslandBorder.ActualWidth, IslandBorder.ActualHeight));
                     var bounds = new Rect(topLeft, bottomRight);
                     if (!bounds.Contains(screenPoint))
-                        _model.Collapse();
+                    {
+                        // 焦点已经被用户点走了，收起时不能再把前台抢回旧窗口
+                        _model.FocusRestore.Forget();
+                        _model.CollapseWithoutFocusRestore();
+                    }
                 });
             }
         }

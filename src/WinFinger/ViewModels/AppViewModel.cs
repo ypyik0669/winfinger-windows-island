@@ -1,4 +1,4 @@
-﻿using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.ComponentModel;
 using WinFinger.Services;
 
 namespace WinFinger.ViewModels;
@@ -192,7 +192,17 @@ public sealed partial class AppViewModel : ObservableObject
 
     public void ToggleExpanded() => IsExpanded = !IsExpanded;
 
+    /// <summary>本次收起是否把焦点还给展开前的前台窗口（点击外部 / 粘贴流程会置 false）。</summary>
+    public bool RestoreFocusOnCollapse { get; set; } = true;
+
     public void Collapse() => IsExpanded = false;
+
+    /// <summary>收起但不还原焦点：用户已经点到别的窗口，或调用方自己接管前台切换。</summary>
+    public void CollapseWithoutFocusRestore()
+    {
+        RestoreFocusOnCollapse = false;
+        IsExpanded = false;
+    }
 
     public void ToggleExpandedPinned() => IsExpandedPinned = !IsExpandedPinned;
 

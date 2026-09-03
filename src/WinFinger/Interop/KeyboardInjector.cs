@@ -7,10 +7,17 @@ namespace WinFinger.Interop;
 /// </summary>
 public static class KeyboardInjector
 {
-    private static readonly int[] Modifiers =
+    /// <summary>需要检查的修饰键，逐个左右分开；扩展键（右 Ctrl/右 Alt/两个 Win）必须带 EXTENDEDKEY。</summary>
+    private static readonly (int Vk, bool Extended)[] Modifiers =
     {
-        NativeMethods.VK_CONTROL, NativeMethods.VK_SHIFT, NativeMethods.VK_MENU,
-        NativeMethods.VK_LWIN, NativeMethods.VK_RWIN
+        (NativeMethods.VK_LSHIFT, false),
+        (NativeMethods.VK_RSHIFT, false),
+        (NativeMethods.VK_LCONTROL, false),
+        (NativeMethods.VK_RCONTROL, true),
+        (NativeMethods.VK_LMENU, false),
+        (NativeMethods.VK_RMENU, true),
+        (NativeMethods.VK_LWIN, true),
+        (NativeMethods.VK_RWIN, true)
     };
 
     /// <summary>
@@ -20,9 +27,9 @@ public static class KeyboardInjector
     public static void ReleaseStuckModifiers()
     {
         var ups = new List<NativeMethods.INPUT>();
-        foreach (var vk in Modifiers)
+        foreach (var (vk, extended) in Modifiers)
         {
-            if (NativeMethods.GetAsyncKeyState(vk) < 0) ups.Add(Key(vk, up: true));
+            if (NativeMethods.GetAsyncKeyState(vk) < 0) ups.Add(Key(vk, up: true, extended));
         }
         if (ups.Count > 0) Send(ups.ToArray());
     }
@@ -51,9 +58,11 @@ public static class KeyboardInjector
         Send(inputs);
     }
 
-    private static NativeMethods.INPUT Key(int vk, bool up)
+    private static NativeMethods.INPUT Key(int vk, bool up, bool extended = false)
     {
-        uint flags = NativeMethods.KEYEVENTF_SCANCODE | (up ? NativeMethods.KEYEVENTF_KEYUP : 0);
+        uint flags = NativeMethods.KEYEVENTF_SCANCODE
+                     | (up ? NativeMethods.KEYEVENTF_KEYUP : 0)
+                     | (extended ? NativeMethods.KEYEVENTF_EXTENDEDKEY : 0);
         return new NativeMethods.INPUT
         {
             type = NativeMethods.INPUT_KEYBOARD,
