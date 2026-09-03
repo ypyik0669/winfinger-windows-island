@@ -13,7 +13,8 @@ public static class HotkeyGesture
 
     /// <summary>
     /// 由修饰键 + 主键拼出 "Ctrl+Shift+V" 这样的手势；
-    /// 主键是修饰键本身、主键不认识、或非 F 键却没带修饰键时返回 null。
+    /// 主键是修饰键本身、主键不认识、或非 F 键却没带 Ctrl/Alt/Win 时返回 null。
+    /// （只按 Shift 不算：Shift+字母 会把普通打字全抢走。）
     /// </summary>
     public static string? Build(ModifierKeys modifiers, Key key)
     {
@@ -22,12 +23,14 @@ public static class HotkeyGesture
         if (main is null) return null;
 
         bool isFunctionKey = key is >= Key.F1 and <= Key.F12;
+        bool hasRealModifier = (modifiers & (ModifierKeys.Control | ModifierKeys.Alt | ModifierKeys.Windows)) != 0;
+        if (!hasRealModifier && !isFunctionKey) return null;
+
         var parts = new List<string>(4);
         if ((modifiers & ModifierKeys.Control) != 0) parts.Add("Ctrl");
         if ((modifiers & ModifierKeys.Shift) != 0) parts.Add("Shift");
         if ((modifiers & ModifierKeys.Alt) != 0) parts.Add("Alt");
         if ((modifiers & ModifierKeys.Windows) != 0) parts.Add("Win");
-        if (parts.Count == 0 && !isFunctionKey) return null; // 单键会抢走全局输入
 
         parts.Add(main);
         string gesture = string.Join("+", parts);
@@ -116,9 +119,16 @@ public sealed class HotkeyCaptureBox : TextBox
 
     protected override void OnPreviewKeyDown(KeyEventArgs e)
     {
-        e.Handled = true;
         var key = e.Key == Key.System ? e.SystemKey : e.Key;
 
+        // Tab / Shift+Tab 留给焦点导航，不当成手势也不吞掉
+        if (key == Key.Tab)
+        {
+            base.OnPreviewKeyDown(e);
+            return;
+        }
+
+        e.Handled = true;
         if (key == Key.Escape)
         {
             SetGesture(_valueOnFocus, notify: false);

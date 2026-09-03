@@ -31,11 +31,14 @@ public class HotkeyGestureTests
     {
         Assert.Equal("F5", HotkeyGesture.Build(ModifierKeys.None, Key.F5));
         Assert.Equal("Ctrl+F12", HotkeyGesture.Build(ModifierKeys.Control, Key.F12));
+        Assert.Equal("Shift+F2", HotkeyGesture.Build(ModifierKeys.Shift, Key.F2)); // F 键上 Shift 单独可用
     }
 
     [Theory]
     [InlineData(ModifierKeys.None, Key.A)]      // 单键会抢走全局输入
     [InlineData(ModifierKeys.None, Key.Space)]
+    [InlineData(ModifierKeys.Shift, Key.A)]     // 只按 Shift 会抢走普通打字
+    [InlineData(ModifierKeys.Shift, Key.D1)]
     [InlineData(ModifierKeys.Control, Key.LeftShift)] // 修饰键不能当主键
     [InlineData(ModifierKeys.Control, Key.None)]
     [InlineData(ModifierKeys.Control, Key.CapsLock)]  // 不支持的主键

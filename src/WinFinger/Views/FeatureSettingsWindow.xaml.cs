@@ -40,8 +40,7 @@ public partial class FeatureSettingsWindow : Window
         InitializeComponent();
         _model.Actions.Changed += OnActionsChanged;
         Closed += OnWindowClosed;
-        LoadFromSettings();
-        _loading = false;
+        LoadFromSettings(); // 结尾会把 _loading 放掉
     }
 
     private AppSettings S => _model.SettingsStore.Settings;
@@ -123,24 +122,45 @@ public partial class FeatureSettingsWindow : Window
 
     private void OnClipboardHotkeyChanged(object? sender, EventArgs e) =>
         CommitHotkey(HotkeyService.HotkeyClipboard, ClipboardHotkeyBox, ClipboardHotkeyError,
-            g => S.ClipboardHotkey = g);
+            () => S.ClipboardHotkey, g => S.ClipboardHotkey = g);
 
     private void OnScreenshotHotkeyChanged(object? sender, EventArgs e) =>
         CommitHotkey(HotkeyService.HotkeyScreenshot, ScreenshotHotkeyBox, ScreenshotHotkeyError,
-            g => S.HotkeyScreenshot = g);
+            () => S.HotkeyScreenshot, g => S.HotkeyScreenshot = g);
 
     private void OnScreenshotOcrHotkeyChanged(object? sender, EventArgs e) =>
         CommitHotkey(HotkeyService.HotkeyScreenshotOcr, ScreenshotOcrHotkeyBox, ScreenshotOcrHotkeyError,
-            g => S.HotkeyScreenshotOcr = g);
+            () => S.HotkeyScreenshotOcr, g => S.HotkeyScreenshotOcr = g);
 
-    /// <summary>写设置 → 重新注册；被占用时提示，旧绑定仍然有效。</summary>
-    private void CommitHotkey(int id, HotkeyCaptureBox box, TextBlock error, Action<string> assign)
+    /// <summary>
+    /// 先拿新手势去注册，成功了才写设置并落盘——
+    /// 注册不上的手势绝不能进 settings.json，否则下次启动就没热键了。
+    /// 失败时捕获框回滚到旧值、旧绑定保持有效，并亮红字提示。
+    /// </summary>
+    private void CommitHotkey(int id, HotkeyCaptureBox box, TextBlock error, Func<string> read, Action<string> assign)
     {
         if (_loading) return;
-        assign(box.Gesture ?? "");
-        _model.SettingsStore.Save();
-        bool ok = _island.ApplyHotkey(id);
-        error.Visibility = ok ? Visibility.Collapsed : Visibility.Visible;
+        string previous = read() ?? "";
+        string candidate = box.Gesture ?? "";
+        if (string.Equals(previous, candidate, StringComparison.Ordinal))
+        {
+            error.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        if (_island.ApplyHotkey(id, candidate))
+        {
+            assign(candidate);
+            _model.SettingsStore.Save();
+            error.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        // 注册失败：设置文件没动过，界面也退回旧手势
+        error.Visibility = Visibility.Visible;
+        _loading = true;
+        box.Gesture = previous;
+        _loading = false;
     }
 
     private void OnPasteAfterSelectChanged(object sender, RoutedEventArgs e)
@@ -274,7 +294,7 @@ public partial class FeatureSettingsWindow : Window
                 _testCts = null;
                 cts.Dispose();
             }
-            TestButton.IsEnabled = true;
+            if (!_closed) TestButton.IsEnabled = true;
         }
     }
 

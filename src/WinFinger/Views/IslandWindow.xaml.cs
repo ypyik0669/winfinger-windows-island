@@ -707,35 +707,43 @@ public partial class IslandWindow : Window
         }
     }
 
-    /// <summary>
-    /// 按设置里的手势（重新）注册指定 id 的全局热键。
-    /// 手势为空视为"不注册"（返回 true，并解掉旧绑定）；被占用返回 false 且旧绑定保持有效。
-    /// 功能设置窗口改完热键后调这里生效。
-    /// </summary>
-    public bool ApplyHotkey(int id)
-    {
-        var settings = _model.SettingsStore.Settings;
-        var (gesture, handler) = id switch
-        {
-            Services.HotkeyService.HotkeyClipboard => (settings.ClipboardHotkey, (Action)(() =>
-            {
-                if (_model.IsExpanded && _model.SelectedPage == AppPage.Clipboard) _model.Collapse();
-                else _model.Select(AppPage.Clipboard);
-            })),
-            Services.HotkeyService.HotkeyScreenshot => (settings.HotkeyScreenshot,
-                (Action)(() => _ = _model.Screenshot.CaptureToHistoryAsync(false))),
-            Services.HotkeyService.HotkeyScreenshotOcr => (settings.HotkeyScreenshotOcr,
-                (Action)(() => _ = _model.Screenshot.CaptureToHistoryAsync(true))),
-            _ => ("", (Action)(() => { }))
-        };
+    /// <summary>按设置里当前记录的手势（重新）注册指定 id 的全局热键。</summary>
+    public bool ApplyHotkey(int id) => ApplyHotkey(id, GestureFor(id));
 
+    /// <summary>
+    /// 用给定手势（重新）注册指定 id 的全局热键，不碰设置文件——
+    /// 功能设置窗口先试注册、成功了再落盘，避免把注册不上的手势写进 settings.json。
+    /// 手势为空视为"不注册"（返回 true，并解掉旧绑定）；被占用返回 false 且旧绑定保持有效。
+    /// </summary>
+    public bool ApplyHotkey(int id, string gesture)
+    {
         if (string.IsNullOrWhiteSpace(gesture))
         {
             _model.Hotkeys.Unregister(id);
             return true;
         }
-        return _model.Hotkeys.Rebind(id, gesture, handler);
+        return _model.Hotkeys.Rebind(id, gesture, HandlerFor(id));
     }
+
+    private string GestureFor(int id) => id switch
+    {
+        Services.HotkeyService.HotkeyClipboard => _model.SettingsStore.Settings.ClipboardHotkey,
+        Services.HotkeyService.HotkeyScreenshot => _model.SettingsStore.Settings.HotkeyScreenshot,
+        Services.HotkeyService.HotkeyScreenshotOcr => _model.SettingsStore.Settings.HotkeyScreenshotOcr,
+        _ => ""
+    };
+
+    private Action HandlerFor(int id) => id switch
+    {
+        Services.HotkeyService.HotkeyClipboard => () =>
+        {
+            if (_model.IsExpanded && _model.SelectedPage == AppPage.Clipboard) _model.Collapse();
+            else _model.Select(AppPage.Clipboard);
+        },
+        Services.HotkeyService.HotkeyScreenshot => () => _ = _model.Screenshot.CaptureToHistoryAsync(false),
+        Services.HotkeyService.HotkeyScreenshotOcr => () => _ = _model.Screenshot.CaptureToHistoryAsync(true),
+        _ => () => { }
+    };
 
     private void OnDisplaySettingsChanged(object? sender, EventArgs e) =>
         Dispatcher.BeginInvoke(() =>
