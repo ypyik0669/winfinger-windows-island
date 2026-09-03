@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -169,6 +169,10 @@ public partial class ExpandedPanelView : UserControl
         DragRegion.ToolTip = pinned ? "已锁定，按住这里可以拖出面板，轻点不会收起" : "按住拖出面板，轻点可收起";
     }
 
+    /// <summary>当前选中页对应的控件（供窗口层转发 Esc / 展开通知）。</summary>
+    public UserControl? CurrentPage =>
+        _model is not null && _pages.TryGetValue(_model.SelectedPage, out var page) ? page : null;
+
     private void SyncFromModel(bool animated)
     {
         if (_model is null) return;
@@ -187,6 +191,7 @@ public partial class ExpandedPanelView : UserControl
         if (ReferenceEquals(PageHost.Content, current)) return;
         PageHost.Content = current;
         (current as IIslandPage)?.OnShown();
+        if (_model.IsExpanded) (current as IIslandPage)?.OnExpanded();
 
         if (animated)
         {
@@ -208,6 +213,14 @@ public interface IIslandPage
 
     /// <summary>Called each time the page becomes the visible tab.</summary>
     void OnShown()
+    {
+    }
+
+    /// <summary>页面先接管 Esc（关闭内部弹层等）；返回 true 表示已处理，面板不收起。</summary>
+    bool HandleEscape() => false;
+
+    /// <summary>面板展开且本页可见时调用（抢焦点、聚焦搜索框等）。</summary>
+    void OnExpanded()
     {
     }
 }

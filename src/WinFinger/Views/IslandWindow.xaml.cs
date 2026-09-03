@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
@@ -78,6 +78,8 @@ public partial class IslandWindow : Window
             MigrateLegacyPosition();
             ApplyDockPosition(animated: false);
             _model.ClipboardMonitor.Attach(this);
+            _model.Hotkeys.Attach(this);
+            RegisterClipboardHotkey();
             _glass = new LiveGlassCapture();
             GlassBrush.ImageSource = _glass.Bitmap;
             _glassTimer = new System.Windows.Threading.DispatcherTimer
@@ -679,7 +681,21 @@ public partial class IslandWindow : Window
         _glass?.Dispose();
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
         RemoveMouseHook();
+        _model.Hotkeys.Detach();
         base.OnClosed(e);
+    }
+
+    /// <summary>注册剪贴板全局热键（默认 Ctrl+Shift+V）。已展开在剪贴板页则再按一次收起。</summary>
+    private void RegisterClipboardHotkey()
+    {
+        var gesture = _model.SettingsStore.Settings.ClipboardHotkey;
+        if (string.IsNullOrWhiteSpace(gesture)) return;
+        bool ok = _model.Hotkeys.Rebind(Services.HotkeyService.HotkeyClipboard, gesture, () =>
+        {
+            if (_model.IsExpanded && _model.SelectedPage == AppPage.Clipboard) _model.Collapse();
+            else _model.Select(AppPage.Clipboard);
+        });
+        if (!ok) _model.Notifications.Post("⌨", $"快捷键 {gesture} 被占用");
     }
 
     private void OnDisplaySettingsChanged(object? sender, EventArgs e) =>
@@ -734,6 +750,12 @@ public partial class IslandWindow : Window
 
         if (e.Key == Key.Escape)
         {
+            // 页面优先处理（内部弹层、预览等），未处理才收起面板
+            if (ExpandedView.CurrentPage is IIslandPage page && page.HandleEscape())
+            {
+                e.Handled = true;
+                return;
+            }
             _model.Collapse();
             e.Handled = true;
             return;
@@ -848,6 +870,8 @@ public partial class IslandWindow : Window
             NotificationView.Visibility = Visibility.Collapsed;
             NotificationView.Opacity = 0;
         }
+        // 必须在岛拿到焦点之前记住上一个前台窗口，否则记到的是我们自己
+        _model.FocusRestore.Remember(_model.ForegroundApp.Hwnd);
         SetNoActivate(false);
         Activate();
         Focus();
@@ -894,12 +918,16 @@ public partial class IslandWindow : Window
         IslandShadow.Opacity = 0.35;
 
         InstallMouseHook();
+
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Input,
+            () => (ExpandedView.CurrentPage as IIslandPage)?.OnExpanded());
     }
 
     private void Collapse()
     {
         RemoveMouseHook();
         SetNoActivate(true);
+        _model.FocusRestore.Restore();
         ResizeLeft.Visibility = Visibility.Collapsed;
         ResizeRight.Visibility = Visibility.Collapsed;
         StopAccentBorder();

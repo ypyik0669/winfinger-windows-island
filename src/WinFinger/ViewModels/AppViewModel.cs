@@ -1,4 +1,4 @@
-using CommunityToolkit.Mvvm.ComponentModel;
+﻿using CommunityToolkit.Mvvm.ComponentModel;
 using WinFinger.Services;
 
 namespace WinFinger.ViewModels;
@@ -67,6 +67,8 @@ public sealed partial class AppViewModel : ObservableObject
     public NotificationService Notifications { get; } = new();
     public SettingsService SettingsStore { get; } = new();
     public ThemeService Theme { get; } = new();
+    public FocusRestoreService FocusRestore { get; } = new();
+    public HotkeyService Hotkeys { get; } = new();
 
     /// <summary>Raised by the window layer when Ctrl+N is pressed while the notes page is showing.</summary>
     public event Action? NewNoteRequested;
