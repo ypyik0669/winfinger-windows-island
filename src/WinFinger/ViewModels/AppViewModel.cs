@@ -69,6 +69,7 @@ public sealed partial class AppViewModel : ObservableObject
     public ThemeService Theme { get; } = new();
     public FocusRestoreService FocusRestore { get; } = new();
     public HotkeyService Hotkeys { get; } = new();
+    public PasteService Paste { get; }
 
     /// <summary>Raised by the window layer when Ctrl+N is pressed while the notes page is showing.</summary>
     public event Action? NewNoteRequested;
@@ -76,6 +77,7 @@ public sealed partial class AppViewModel : ObservableObject
     public AppViewModel()
     {
         ClipboardMonitor = new ClipboardMonitorService(ClipboardStore, ForegroundApp, SettingsStore);
+        Paste = new PasteService(ClipboardMonitor, ClipboardStore, FocusRestore, this, Notifications);
 
         var settings = SettingsStore.Settings;
         ClipboardMonitor.IsPaused = settings.ClipboardPaused;
