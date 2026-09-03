@@ -19,6 +19,68 @@ public class ChatStoreTests
     private static ChatMessage Assistant(string text) => new() { Role = ChatMessage.RoleAssistant, Content = text };
 
     [Fact]
+    public void Summarize_DropsFencedCodeAndMarkdownMarks()
+    {
+        string content = string.Join("\n", new[]
+        {
+            "## 标题",
+            "",
+            "**要点**在这里",
+            "```python",
+            "print('hello')",
+            "```",
+            "收尾"
+        });
+
+        string preview = Models.ChatSession.Summarize(content);
+
+        Assert.DoesNotContain("```", preview);
+        Assert.DoesNotContain("print(", preview);
+        Assert.DoesNotContain("**", preview);
+        Assert.StartsWith("标题", preview);
+    }
+
+    [Fact]
+    public void Summarize_UnterminatedFence_DropsRest()
+    {
+        string preview = Models.ChatSession.Summarize("说明文字\n```python\nx = 1\ny = 2");
+        Assert.Equal("说明文字", preview);
+    }
+
+    [Fact]
+    public void RestoreInterrupted_EmptyPartial_IsMarkedInterrupted()
+    {
+        var session = new ChatSession();
+        session.Messages.Add(new ChatMessage { Role = ChatMessage.RoleAssistant, IsPartial = true });
+
+        ChatStore.RestoreInterrupted(session);
+
+        Assert.False(session.Messages[0].IsPartial);
+        Assert.Equal("已中断", session.Messages[0].Error);
+    }
+
+    [Fact]
+    public void RestoreInterrupted_PartialWithText_KeepsTextAndEntersContext()
+    {
+        var session = new ChatSession();
+        session.Messages.Add(User("问题"));
+        session.Messages.Add(new ChatMessage
+        {
+            Role = ChatMessage.RoleAssistant,
+            Content = "写到一半",
+            IsPartial = true
+        });
+
+        ChatStore.RestoreInterrupted(session);
+
+        Assert.False(session.Messages[1].IsPartial);
+        Assert.True(session.Messages[1].Stopped);
+        Assert.Null(session.Messages[1].Error);
+        // 关键：清掉 partial 之后这条才会被带进下一次请求
+        Assert.Contains(ChatStore.BuildContext(session, ""), t => t.Content == "写到一半");
+    }
+
+    [Fact]
     public void DeriveTitle_UsesFirstNonEmptyLine()
     {
         Assert.Equal("帮我总结这段日志", ChatStore.DeriveTitle("\n\n帮我总结这段日志\n后面还有很多内容"));

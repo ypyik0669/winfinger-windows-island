@@ -78,7 +78,9 @@ public sealed class ChatService
             ? (string.IsNullOrWhiteSpace(cfg.ChatSystemPrompt) ? AiService.ChatSystemPrompt : cfg.ChatSystemPrompt)
             : session.SystemPrompt;
         var turns = ChatStore.BuildContext(session, systemPrompt, cfg.ChatContextChars);
-        string? model = string.IsNullOrWhiteSpace(cfg.ChatModel) ? null : cfg.ChatModel;
+        // 优先级：本会话选的模型 > 对话页专用模型 > 全局模型
+        string? model = !string.IsNullOrWhiteSpace(session.Model) ? session.Model
+            : string.IsNullOrWhiteSpace(cfg.ChatModel) ? null : cfg.ChatModel;
 
         string? error = null;
         try
@@ -140,8 +142,11 @@ public sealed class ChatService
         }
 
         string text = run.Snapshot();
-        if (text.Length != run.Message.Content.Length)
+        // 跟「上次刷出去的长度」比，而不是跟消息现在的长度比：超长回复被 TrimForStorage
+        // 截过之后两者永远不等，会每 5s 在截断版和完整版之间来回跳
+        if (text.Length != run.FlushedLength)
         {
+            run.FlushedLength = text.Length;
             run.Message.Content = text;
             StateChanged?.Invoke();
         }
@@ -162,16 +167,18 @@ public sealed class ChatService
         string text = run.Snapshot();
         if (run.Settled)
         {
-            // 迟到的收尾：只在拿到了更多文本时补写
-            if (text.Length > run.Message.Content.Length)
+            // 迟到的收尾：只在拿到了更多文本时补写。走 Checkpoint 而不是直接改 Content，
+            // 这样超长时照样截断、侧栏预览也跟着刷新
+            if (text.Length > run.FlushedLength)
             {
-                run.Message.Content = text;
-                _store.Save();
+                run.FlushedLength = text.Length;
+                _store.Checkpoint(run.Session, run.Message, text);
             }
             return;
         }
 
         run.Settled = true;
+        run.FlushedLength = text.Length;
         _store.CompleteAssistant(run.Session, run.Message, text,
             error ?? (text.Length == 0 && !stopped ? "AI 没有返回内容" : null), stopped);
 
@@ -201,6 +208,9 @@ public sealed class ChatService
         public CancellationTokenSource Cts { get; }
         public bool Settled { get; set; }
         public bool StopRequested { get; set; }
+
+        /// <summary>最近一次刷进消息的文本长度（消息里的文本可能被截断过，不能拿它当基准）。</summary>
+        public int FlushedLength { get; set; }
 
         public void Append(string chunk)
         {

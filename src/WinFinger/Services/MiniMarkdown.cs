@@ -484,9 +484,10 @@ public static class MiniMarkdown
                 continue;
             }
 
-            if (c == '*' && i + 1 < n && text[i + 1] == '*')
+            if ((c == '*' || c == '_') && i + 1 < n && text[i + 1] == c
+                && !(c == '_' && i > 0 && IsWordChar(text[i - 1])))
             {
-                int close = IndexOfDoubleStar(text, i + 2);
+                int close = IndexOfDouble(text, i + 2, c);
                 if (close >= 0)
                 {
                     FlushText(buf, result);
@@ -501,8 +502,8 @@ public static class MiniMarkdown
 
             if (c == '*' || c == '_')
             {
-                int close = text.IndexOf(c, i + 1);
-                if (close >= 0)
+                int close = FindEmphasisClose(text, i, c);
+                if (close > i + 1)
                 {
                     FlushText(buf, result);
                     result.Add(new MdSpan(MdSpanKind.Italic, text.Substring(i + 1, close - i - 1)));
@@ -522,6 +523,30 @@ public static class MiniMarkdown
         return result;
     }
 
+    /// <summary>
+    /// 找配对的斜体标记，用的是 CommonMark 定界规则的简化版：
+    /// `_` 只有在词的边界上才算标记——不然 MAX_BUFFER_SIZE、foo_bar_baz 这类标识符
+    /// 会被吃掉下划线变成斜体（模型写代码相关内容时非常常见）；
+    /// 另外开标记后面不能是空白、闭标记前面不能是空白，这样 "2 * 3 ... 4 * 5" 里的乘号也不会配上对。
+    /// </summary>
+    private static int FindEmphasisClose(string text, int open, char marker)
+    {
+        if (open + 1 >= text.Length) return -1;
+        if (char.IsWhiteSpace(text[open + 1])) return -1;
+        if (marker == '_' && open > 0 && IsWordChar(text[open - 1])) return -1;
+
+        for (int i = open + 1; i < text.Length; i++)
+        {
+            if (text[i] != marker) continue;
+            if (char.IsWhiteSpace(text[i - 1])) continue;
+            if (marker == '_' && i + 1 < text.Length && IsWordChar(text[i + 1])) continue;
+            return i;
+        }
+        return -1;
+    }
+
+    private static bool IsWordChar(char c) => char.IsLetterOrDigit(c) || c == '_';
+
     private static void FlushText(StringBuilder buf, List<MdSpan> result)
     {
         if (buf.Length == 0) return;
@@ -532,10 +557,15 @@ public static class MiniMarkdown
     private static bool IsEscapable(char c) => c is '*' or '`' or '_' or '\\';
 
     /// <summary>从 start 开始找下一个"**"（两个连续的星号）出现的位置，找不到返回 -1。</summary>
-    private static int IndexOfDoubleStar(string s, int start)
+    /// <summary>找配对的双标记（** 或 __）；__ 同样只认词边界，别把 foo__bar__baz 当成粗体。</summary>
+    private static int IndexOfDouble(string s, int start, char marker)
     {
         for (int k = start; k < s.Length - 1; k++)
-            if (s[k] == '*' && s[k + 1] == '*') return k;
+        {
+            if (s[k] != marker || s[k + 1] != marker) continue;
+            if (marker == '_' && k + 2 < s.Length && IsWordChar(s[k + 2])) continue;
+            return k;
+        }
         return -1;
     }
 }

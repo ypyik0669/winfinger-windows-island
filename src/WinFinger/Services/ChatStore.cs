@@ -48,6 +48,9 @@ public sealed class ChatStore
     /// <summary>串行化落盘任务链：避免旧快照后写覆盖新快照。</summary>
     private Task _flushChain = Task.CompletedTask;
 
+    /// <summary>载入时读文件失败过：第一次写盘前先把旧文件复制一份，别把历史直接覆盖没了。</summary>
+    private bool _backupBeforeWrite;
+
     public ChatStore()
     {
         // 构造在 UI 线程（AppViewModel 字段初始化），DispatcherTimer 可安全创建
@@ -171,6 +174,23 @@ public sealed class ChatStore
 
     // ── 纯函数（可单测，不需要 Dispatcher） ──
 
+    /// <summary>
+    /// 载入时收拾上次被强杀留下的半截回复。partial 必须在这里清掉——
+    /// BuildContext 会跳过所有 partial 的助手消息，留着的话这条内容看着完全正常，
+    /// 却永远进不了上下文，用户追问时模型等于没见过自己刚说过的话。
+    /// </summary>
+    public static void RestoreInterrupted(ChatSession session)
+    {
+        foreach (var message in session.Messages)
+        {
+            if (!message.IsPartial) continue;
+            message.IsPartial = false;
+            if (message.HasError) continue;
+            if (message.Content.Length == 0) message.Error = "已中断";
+            else message.Stopped = true; // 半截但有内容：按「已停止」显示，内容留着
+        }
+    }
+
     /// <summary>会话标题：第一条用户消息的首行，去掉 markdown 噪声，截到 20 字。</summary>
     public static string DeriveTitle(string text)
     {
@@ -270,10 +290,7 @@ public sealed class ChatStore
             if (archive?.Sessions is not { Count: > 0 } sessions) return;
             foreach (var session in sessions.OrderByDescending(s => s.UpdatedAt))
             {
-                // 上次是被强杀的：空的半截回复留着没意义，标记出来让界面能给「重试」
-                foreach (var message in session.Messages)
-                    if (message.IsPartial && message.Content.Length == 0 && !message.HasError)
-                        message.Error = "已中断";
+                RestoreInterrupted(session);
                 Sessions.Add(session);
             }
         }
@@ -284,7 +301,9 @@ public sealed class ChatStore
         }
         catch
         {
-            // 瞬时 I/O 失败：文件本身健康，不动它，本次会话退回空列表
+            // 瞬时 I/O 失败（杀软/备份正占着文件）：内容大概率是好的，但内存里现在是空的，
+            // 接下来任何一次 Save 都会把整份历史覆盖掉。标记一下，首次写盘前先留个 .bak。
+            _backupBeforeWrite = true;
         }
     }
 
@@ -304,7 +323,9 @@ public sealed class ChatStore
     {
         // 深拷贝再交给后台线程：流式输出随时在改 Content，直接序列化实时对象会写出半截甚至抛异常
         var snapshot = new ChatArchive { Sessions = Sessions.Select(Snapshot).ToList() };
-        _flushChain = _flushChain.ContinueWith(_ => WriteToDisk(snapshot),
+        bool backup = _backupBeforeWrite;
+        _backupBeforeWrite = false;
+        _flushChain = _flushChain.ContinueWith(_ => WriteToDisk(snapshot, backup),
             CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
         return _flushChain;
     }
@@ -318,6 +339,7 @@ public sealed class ChatStore
             Title = session.Title,
             TitleIsCustom = session.TitleIsCustom,
             SystemPrompt = session.SystemPrompt,
+            Model = session.Model,
             UpdatedAt = session.UpdatedAt
         };
         foreach (var message in session.Messages.ToList())
@@ -336,11 +358,16 @@ public sealed class ChatStore
         return copy;
     }
 
-    private static void WriteToDisk(ChatArchive archive)
+    private static void WriteToDisk(ChatArchive archive, bool backupFirst)
     {
         try
         {
             StoragePaths.EnsureCreated();
+            if (backupFirst && File.Exists(StoragePaths.ChatJson))
+            {
+                try { File.Copy(StoragePaths.ChatJson, StoragePaths.ChatJson + ".bak", overwrite: true); }
+                catch { /* best effort */ }
+            }
             AtomicJson.Write(StoragePaths.ChatJson, archive, JsonOptions);
         }
         catch

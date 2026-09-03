@@ -83,6 +83,9 @@ public sealed class SettingsService
 
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
+    /// <summary>设置写盘后触发（调用方都在 UI 线程）。界面据此刷新依赖设置的状态，比如「有没有配置 Key」。</summary>
+    public event Action? Changed;
+
     public void Save()
     {
         try
@@ -94,6 +97,7 @@ public sealed class SettingsService
         {
             // best effort
         }
+        Changed?.Invoke();
     }
 
     /// <summary>取出明文 API Key；未设置或解密失败（换机/换用户）返回 null，不抛异常。</summary>

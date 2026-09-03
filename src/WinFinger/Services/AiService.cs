@@ -209,6 +209,65 @@ public sealed class AiService
         }
     }
 
+    /// <summary>拉服务端的模型列表（GET {BaseUrl}/models）。失败返回空表，绝不抛——列表拿不到不该影响发消息。</summary>
+    public async Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken ct)
+    {
+        string? key = _settings.GetAiApiKey();
+        if (string.IsNullOrWhiteSpace(key)) return Array.Empty<string>();
+
+        var cfg = _settings.Settings;
+        string baseUrl = (cfg.AiBaseUrl ?? "").Trim().TrimEnd('/');
+        if (baseUrl.Length == 0) baseUrl = Defaults.AiBaseUrl.TrimEnd('/');
+
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        linked.CancelAfter(TimeSpan.FromSeconds(15));
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"{baseUrl}/models");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
+            using var response = await Http.SendAsync(request, HttpCompletionOption.ResponseContentRead, linked.Token)
+                .ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode) return Array.Empty<string>();
+            string body = await response.Content.ReadAsStringAsync(linked.Token).ConfigureAwait(false);
+            return ParseModelIds(body);
+        }
+        catch
+        {
+            return Array.Empty<string>();
+        }
+    }
+
+    /// <summary>从 /models 响应里取 id 列表（抽出来可单测：有的网关返回裸数组或缺字段）。</summary>
+    internal static IReadOnlyList<string> ParseModelIds(string body)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
+            var array = root.ValueKind == JsonValueKind.Array ? root
+                : root.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array ? data
+                : default;
+            if (array.ValueKind != JsonValueKind.Array) return Array.Empty<string>();
+
+            var ids = new List<string>();
+            foreach (var item in array.EnumerateArray())
+            {
+                string? id = item.ValueKind == JsonValueKind.String
+                    ? item.GetString()
+                    : item.TryGetProperty("id", out var idElement) && idElement.ValueKind == JsonValueKind.String
+                        ? idElement.GetString()
+                        : null;
+                if (!string.IsNullOrWhiteSpace(id)) ids.Add(id!);
+            }
+            ids.Sort(StringComparer.OrdinalIgnoreCase);
+            return ids;
+        }
+        catch
+        {
+            return Array.Empty<string>();
+        }
+    }
+
     /// <summary>连通性自检：发一次极小的请求，返回 (是否成功, 提示文案)。</summary>
     public async Task<(bool ok, string message)> TestAsync(CancellationToken ct)
     {

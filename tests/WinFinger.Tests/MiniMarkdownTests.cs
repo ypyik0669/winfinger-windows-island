@@ -464,6 +464,54 @@ public class MiniMarkdownTests
         Assert.Equal(new MdSpan(MdSpanKind.Italic, "i"), span);
     }
 
+    [Theory]
+    [InlineData("MAX_BUFFER_SIZE")]
+    [InlineData("foo_bar_baz")]
+    [InlineData("snake_case and other_name here")]
+    public void ParseInline_UnderscoresInsideWords_StayLiteral(string input)
+    {
+        var span = Assert.Single(MiniMarkdown.ParseInline(input));
+        Assert.Equal(new MdSpan(MdSpanKind.Text, input), span);
+    }
+
+    [Fact]
+    public void ParseInline_UnderscoreItalicAtWordBoundary_StillWorks()
+    {
+        var spans = MiniMarkdown.ParseInline("说明 _重点_ 收尾");
+        Assert.Contains(spans, s => s.Kind == MdSpanKind.Italic && s.Text == "重点");
+    }
+
+    [Theory]
+    [InlineData("2 * 3 = 6 and 4 * 5 = 20")]
+    [InlineData("a * b")]
+    public void ParseInline_StarWithSpaces_IsNotItalic(string input)
+    {
+        var span = Assert.Single(MiniMarkdown.ParseInline(input));
+        Assert.Equal(MdSpanKind.Text, span.Kind);
+        Assert.Equal(input, span.Text);
+    }
+
+    [Fact]
+    public void ParseInline_EmptyEmphasis_StaysLiteral()
+    {
+        var span = Assert.Single(MiniMarkdown.ParseInline("__"));
+        Assert.Equal(MdSpanKind.Text, span.Kind);
+    }
+
+    [Fact]
+    public void ParseInline_DoubleUnderscore_IsBold()
+    {
+        var spans = MiniMarkdown.ParseInline("__重点__ 收尾");
+        Assert.Equal(new MdSpan(MdSpanKind.Bold, "重点"), spans[0]);
+    }
+
+    [Fact]
+    public void ParseInline_DoubleUnderscoreInsideWord_StaysLiteral()
+    {
+        var span = Assert.Single(MiniMarkdown.ParseInline("foo__bar__baz"));
+        Assert.Equal(new MdSpan(MdSpanKind.Text, "foo__bar__baz"), span);
+    }
+
     [Fact]
     public void ParseInline_Code()
     {

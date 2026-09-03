@@ -327,13 +327,19 @@ public sealed partial class AppViewModel : ObservableObject
     public void RequestNewChat() => NewChatRequested?.Invoke();
 
     /// <summary>抽屉里的 AI 结果「继续追问」：把原文与结果作为一轮历史放进新会话，输入框留空。</summary>
-    public void ContinueInChat(string result, Models.ClipboardEntry? source)
+    public void ContinueInChat(string result, Models.ClipboardEntry? source, string? title = null)
     {
         if (string.IsNullOrWhiteSpace(result)) return;
         var session = Chat.Create(ChatPrompt());
         string? origin = source?.Text ?? source?.OcrText;
-        if (!string.IsNullOrWhiteSpace(origin)) Chat.AppendUser(session, origin!, "来自剪贴板");
+        string label = string.IsNullOrWhiteSpace(title) ? "上一条结果" : title!.Trim();
+        // 必须先放一条 user：BuildContext 会把开头的 assistant 削掉，
+        // 只塞结果的话追问时模型看不到自己刚给出的那段内容
+        string ask = string.IsNullOrWhiteSpace(origin) ? label : $"{label}：\n{origin}";
+        Chat.AppendUser(session, ask, source is null ? "来自结果面板" : "来自剪贴板");
         Chat.AppendAssistant(session, result);
+        // 标题用动作名，别让首行的「翻译：」原样变成会话名
+        Chat.Rename(session, label);
         Select(AppPage.Chat);
         ChatPrefillRequested?.Invoke(session, "", null);
     }

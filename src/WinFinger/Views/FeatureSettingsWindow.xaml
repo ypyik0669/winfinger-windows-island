@@ -93,8 +93,17 @@
                     </Grid>
 
                     <TextBlock Text="模型" Style="{StaticResource Text.SmallLabel}"/>
-                    <ComboBox x:Name="ModelCombo" Style="{StaticResource ComboBox.Dark}" IsEditable="True"
-                              LostFocus="OnModelCommit" SelectionChanged="OnModelSelectionChanged"/>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <ComboBox x:Name="ModelCombo" Grid.Column="0" Style="{StaticResource ComboBox.Dark}" IsEditable="True"
+                                  LostFocus="OnModelCommit" SelectionChanged="OnModelSelectionChanged"/>
+                        <Button x:Name="FetchModelsButton" Grid.Column="1" Content="获取列表" Margin="8,0,0,0"
+                                Style="{StaticResource Button.Secondary}" Click="OnFetchModels"
+                                ToolTip="从上面填的接口地址拉取可用模型"/>
+                    </Grid>
 
                     <TextBlock Text="翻译目标语言" Style="{StaticResource Text.SmallLabel}"/>
                     <ComboBox x:Name="TargetLanguageCombo" Style="{StaticResource ComboBox.Dark}"

@@ -32,6 +32,9 @@ public sealed class ChatSession : INotifyPropertyChanged
     /// </summary>
     [JsonPropertyName("systemPrompt")] public string SystemPrompt { get; set; } = "";
 
+    /// <summary>本会话使用的模型；null / 空 = 跟随设置里的模型。</summary>
+    [JsonPropertyName("model")] public string? Model { get; set; }
+
     [JsonPropertyName("updatedAt")]
     public DateTime UpdatedAt
     {
@@ -58,11 +61,32 @@ public sealed class ChatSession : INotifyPropertyChanged
         {
             for (int i = Messages.Count - 1; i >= 0; i--)
             {
-                string text = Messages[i].Content.ReplaceLineEndings(" ").Trim();
+                string text = Summarize(Messages[i].Content);
                 if (text.Length > 0) return text.Length <= 40 ? text : text[..40] + "…";
             }
             return "还没有消息";
         }
+    }
+
+    /// <summary>把一段回复压成一行预览：丢掉围栏代码块和 markdown 记号，否则列表里全是 ``` 和 #。</summary>
+    public static string Summarize(string content)
+    {
+        var parts = new List<string>();
+        bool inCode = false;
+        foreach (string raw in content.ReplaceLineEndings("\n").Split('\n'))
+        {
+            string line = raw.Trim();
+            if (line.StartsWith("```", StringComparison.Ordinal) || line.StartsWith("~~~", StringComparison.Ordinal))
+            {
+                inCode = !inCode;
+                continue;
+            }
+            if (inCode || line.Length == 0) continue;
+            line = line.TrimStart('#', '>', '-', '*', '+', ' ').Replace("**", "").Replace("`", "").Trim();
+            if (line.Length > 0) parts.Add(line);
+            if (parts.Count >= 3) break;
+        }
+        return string.Join(" ", parts).Trim();
     }
 
     /// <summary>消息变动后刷新活跃时间与列表上的预览。</summary>

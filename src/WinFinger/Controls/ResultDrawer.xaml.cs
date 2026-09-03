@@ -379,7 +379,8 @@ public partial class ResultDrawer : UserControl, IResultPresenter
             Footer.Children.Add(FooterButton("继续追问", "Button.Secondary", () =>
             {
                 if (_model is null) return;
-                _model.ContinueInChat(ResultText, _sourceEntry);
+                // 带上标题（「翻译」「总结」…）：没有源条目时它就是新会话里唯一的提问
+                _model.ContinueInChat(ResultText, _sourceEntry, HeaderTitle.Text);
                 Close();
             }, hasText));
 

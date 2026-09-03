@@ -93,9 +93,11 @@ public partial class App : Application
         _trayIcon?.Dispose();
         if (_ownsMutex)
         {
+            // 先 Stop 再落盘：Stop 会把在飞的 AI 流收尾（清 partial、写回半截文本），
+            // 反过来的话收尾只排了一次去抖保存，而 Dispatcher 马上就关了，那条回复会永远停在 partial
+            try { Model.Stop(); } catch (Exception ex) { LogCrash(ex); }
             try { Model.ClipboardStore.SaveNow(); } catch (Exception ex) { LogCrash(ex); }
             try { Model.Chat.SaveNow(); } catch (Exception ex) { LogCrash(ex); }
-            try { Model.Stop(); } catch (Exception ex) { LogCrash(ex); }
             try { _singleInstanceMutex?.ReleaseMutex(); } catch (ApplicationException) { }
         }
         _singleInstanceMutex?.Dispose();

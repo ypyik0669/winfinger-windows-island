@@ -64,7 +64,9 @@
                     </ListBox.ItemContainerStyle>
                     <ListBox.ItemTemplate>
                         <DataTemplate DataType="{x:Type models:ChatSession}">
-                            <Grid>
+                            <!-- Background 必须给：不给的话空白处不参与命中测试，
+                                 只有正好点在标题文字上右键菜单才出得来 -->
+                            <Grid Background="Transparent">
                                 <Grid.ContextMenu>
                                     <ContextMenu>
                                         <MenuItem Style="{StaticResource MenuItem.Flat}" Header="重命名…" Click="OnContextRename"/>
@@ -109,6 +111,7 @@
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="SessionTitle" Grid.Column="0" FontSize="13" FontWeight="SemiBold"
                            FontFamily="{StaticResource Font.Text}" Foreground="{DynamicResource Brush.TextPrimary}"
@@ -117,8 +120,10 @@
                          VerticalAlignment="Center" Visibility="Collapsed"/>
                 <TextBlock x:Name="StatusText" Grid.Column="1" Style="{StaticResource Text.Micro}"
                            VerticalAlignment="Center" Margin="10,0,0,0"/>
-                <Button x:Name="ModelButton" Grid.Column="2" Style="{StaticResource Button.Icon}" Width="28" Height="28"
-                        Margin="8,0,0,0" Content="&#xE713;" FontSize="12" ToolTip="AI 设置"/>
+                <Button x:Name="ModelChip" Grid.Column="2" Style="{StaticResource Button.Secondary}"
+                        Margin="10,0,0,0" Content="模型" ToolTip="选择这个会话使用的模型"/>
+                <Button x:Name="ModelButton" Grid.Column="3" Style="{StaticResource Button.Icon}" Width="28" Height="28"
+                        Margin="6,0,0,0" Content="&#xE713;" FontSize="12" ToolTip="AI 设置"/>
             </Grid>
 
             <ScrollViewer x:Name="Transcript" Grid.Row="1" Style="{StaticResource Scroll.Dark}" Margin="0,10,0,0"
@@ -159,6 +164,9 @@
                                 <DataTrigger Binding="{Binding IsUser}" Value="True">
                                     <Setter TargetName="plainBody" Property="Visibility" Value="Visible"/>
                                     <Setter TargetName="richBody" Property="Visibility" Value="Collapsed"/>
+                                    <!-- 同时把 Source 清空：只藏不清的话，粘进来的几万字用户消息
+                                         照样会被解析成一棵永远不显示的 WPF 元素树 -->
+                                    <Setter TargetName="richBody" Property="Source" Value=""/>
                                     <Setter TargetName="bubble" Property="HorizontalAlignment" Value="Right"/>
                                     <Setter TargetName="bubble" Property="MaxWidth" Value="460"/>
                                     <Setter TargetName="bubble" Property="Background"

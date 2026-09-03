@@ -231,6 +231,37 @@ public partial class FeatureSettingsWindow : Window
         _model.SettingsStore.Save();
     }
 
+    /// <summary>
+    /// 从当前接口地址拉一遍模型列表填进下拉框。换成自建/中转接口时，预设里那几个 OpenAI 名字
+    /// 基本都不存在，不拉一次就只能靠猜——猜错的表现是每次动作都报「模型或地址不存在」。
+    /// </summary>
+    private async void OnFetchModels(object sender, RoutedEventArgs e)
+    {
+        FetchModelsButton.IsEnabled = false;
+        string original = (string)FetchModelsButton.Content;
+        FetchModelsButton.Content = "获取中…";
+        try
+        {
+            var models = await _model.Ai.ListModelsAsync(CancellationToken.None);
+            if (models.Count == 0)
+            {
+                _model.Notifications.Post("🤖", "没能获取模型列表，检查接口地址和 Key");
+                return;
+            }
+
+            string current = ModelCombo.Text;
+            ModelCombo.Items.Clear();
+            foreach (string id in models) ModelCombo.Items.Add(id);
+            ModelCombo.Text = current; // 别把用户已经填的名字冲掉
+            _model.Notifications.Post("🤖", $"取到 {models.Count} 个模型");
+        }
+        finally
+        {
+            FetchModelsButton.Content = original;
+            FetchModelsButton.IsEnabled = true;
+        }
+    }
+
     private void OnTargetLanguageChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_loading) return;
