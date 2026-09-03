@@ -72,7 +72,11 @@ public sealed class FilePathToIconConverter : IValueConverter
         ImageSource? result = null;
         try
         {
-            if (File.Exists(path))
+            if (Directory.Exists(path))
+            {
+                result = ShellIcon(path, Interop.NativeMethods.FILE_ATTRIBUTE_DIRECTORY);
+            }
+            else if (File.Exists(path))
             {
                 using var icon = System.Drawing.Icon.ExtractAssociatedIcon(path);
                 if (icon is not null)
@@ -92,6 +96,31 @@ public sealed class FilePathToIconConverter : IValueConverter
             Cache[key] = result;
         }
         return result;
+    }
+
+    /// <summary>Shell 图标（文件夹等）：SHGetFileInfo + USEFILEATTRIBUTES，不碰真实磁盘属性。</summary>
+    private static ImageSource? ShellIcon(string path, uint attributes)
+    {
+        var info = new Interop.NativeMethods.SHFILEINFO();
+        IntPtr handle = Interop.NativeMethods.SHGetFileInfo(path, attributes, ref info,
+            (uint)System.Runtime.InteropServices.Marshal.SizeOf<Interop.NativeMethods.SHFILEINFO>(),
+            Interop.NativeMethods.SHGFI_ICON | Interop.NativeMethods.SHGFI_SMALLICON |
+            Interop.NativeMethods.SHGFI_USEFILEATTRIBUTES);
+        if (handle == IntPtr.Zero || info.hIcon == IntPtr.Zero) return null;
+        try
+        {
+            var src = Imaging.CreateBitmapSourceFromHIcon(info.hIcon, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
+            src.Freeze();
+            return src;
+        }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            Interop.NativeMethods.DestroyIcon(info.hIcon);
+        }
     }
 
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)

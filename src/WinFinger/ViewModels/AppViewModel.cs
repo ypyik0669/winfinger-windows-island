@@ -1,4 +1,6 @@
+using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
+using WinFinger.Models;
 using WinFinger.Services;
 
 namespace WinFinger.ViewModels;
@@ -70,6 +72,9 @@ public sealed partial class AppViewModel : ObservableObject
     public FocusRestoreService FocusRestore { get; } = new();
     public HotkeyService Hotkeys { get; } = new();
     public PasteService Paste { get; }
+
+    /// <summary>剪贴板条目动作扩展点：OCR / AI 等能力在这里注册自己的菜单项。</summary>
+    public ObservableCollection<IEntryActionProvider> EntryActionProviders { get; } = new();
 
     /// <summary>Raised by the window layer when Ctrl+N is pressed while the notes page is showing.</summary>
     public event Action? NewNoteRequested;

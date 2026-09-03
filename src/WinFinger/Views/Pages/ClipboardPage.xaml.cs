@@ -1,9 +1,13 @@
 using System.Collections.Specialized;
 using System.ComponentModel;
+using System.Diagnostics;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using WinFinger.Models;
@@ -17,7 +21,9 @@ public partial class ClipboardPage : UserControl, IIslandPage
     private ClipboardFilter _filter = ClipboardFilter.All;
     private ICollectionView? _view;
     private readonly DispatcherTimer _hoverTimer;
+    private readonly DispatcherTimer _relativeTimer;
     private FrameworkElement? _hoverTarget;
+    private ClipboardEntry? _editingEntry;
 
     public ClipboardPage()
     {
@@ -27,6 +33,14 @@ public partial class ClipboardPage : UserControl, IIslandPage
         {
             _hoverTimer.Stop();
             ShowPreview();
+        };
+        // 相对时间（"3分钟"）每分钟重算一次，仅在页面可见时跑
+        _relativeTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(60) };
+        _relativeTimer.Tick += (_, _) => RefreshRelativeTimes();
+        IsVisibleChanged += (_, e) =>
+        {
+            if (e.NewValue is true) _relativeTimer.Start();
+            else _relativeTimer.Stop();
         };
     }
 
@@ -51,13 +65,40 @@ public partial class ClipboardPage : UserControl, IIslandPage
                 RefreshEmptyState();
             }
         };
-        ClearButton.Click += (_, _) => model.ClipboardStore.Clear(includeFavorites: false);
+
+        ClearButton.Click += (_, _) =>
+            ClearConfirm.Visibility = ClearConfirm.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
+        ClearKeepFavoritesButton.Click += (_, _) =>
+        {
+            ClearConfirm.Visibility = Visibility.Collapsed;
+            model.ClipboardStore.Clear(includeFavorites: false);
+        };
+        ClearAllButton.Click += (_, _) =>
+        {
+            ClearConfirm.Visibility = Visibility.Collapsed;
+            model.ClipboardStore.Clear(includeFavorites: true);
+        };
+        ClearCancelButton.Click += (_, _) => ClearConfirm.Visibility = Visibility.Collapsed;
+
         ClearSearchButton.Click += (_, _) => SearchBox.Text = "";
         SearchBox.TextChanged += (_, _) =>
         {
             SearchPlaceholder.Visibility = SearchBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
             ClearSearchButton.Visibility = SearchBox.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
             RefreshFilter();
+        };
+        SearchBox.PreviewKeyDown += (_, e) => HandleListKey(e);
+        EntryList.PreviewKeyDown += (_, e) => HandleListKey(e);
+
+        EditSaveButton.Click += (_, _) => CommitEdit();
+        EditCancelButton.Click += (_, _) => CloseEdit();
+        EditBox.PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Enter && (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
+            {
+                e.Handled = true;
+                CommitEdit();
+            }
         };
 
         WireFilter(FilterAll, ClipboardFilter.All);
@@ -72,7 +113,43 @@ public partial class ClipboardPage : UserControl, IIslandPage
         RefreshFilter();
     }
 
-    public void OnShown() => RefreshFilter();
+    public void OnShown()
+    {
+        RefreshFilter();
+        _relativeTimer.Start();
+        FocusSearch();
+    }
+
+    /// <summary>面板展开：焦点直接落在搜索框，输入即筛选。</summary>
+    public void OnExpanded() => FocusSearch();
+
+    public bool HandleEscape()
+    {
+        if (EditPopup.IsOpen)
+        {
+            CloseEdit();
+            return true;
+        }
+        if (SearchBox.Text.Length > 0)
+        {
+            SearchBox.Text = "";
+            FocusSearch();
+            return true;
+        }
+        if (ClearConfirm.Visibility == Visibility.Visible)
+        {
+            ClearConfirm.Visibility = Visibility.Collapsed;
+            return true;
+        }
+        return false;
+    }
+
+    private void FocusSearch() => Dispatcher.BeginInvoke(DispatcherPriority.Input, () =>
+    {
+        EntryList.SelectedIndex = -1;
+        SearchBox.Focus();
+        SearchBox.SelectAll();
+    });
 
     private void WireFilter(RadioButton button, ClipboardFilter filter)
     {
@@ -88,7 +165,16 @@ public partial class ClipboardPage : UserControl, IIslandPage
     private void RefreshFilter()
     {
         _view?.Refresh();
+        // 过滤后选中项可能已经不在视图里，清掉避免"看不见的选中"
+        if (EntryList.SelectedItem is ClipboardEntry selected && !VisibleEntries().Contains(selected))
+            EntryList.SelectedIndex = -1;
         RefreshEmptyState();
+    }
+
+    private void RefreshRelativeTimes()
+    {
+        if (_model is null) return;
+        foreach (var entry in _model.ClipboardStore.Entries) entry.RaiseCreatedAtChanged();
     }
 
     private void RefreshPauseButton()
@@ -130,20 +216,330 @@ public partial class ClipboardPage : UserControl, IIslandPage
         EmptySubtitle.Text = subtitle;
     }
 
-    // ── row actions ──
+    // ── selection helpers ──
 
-    private void OnRowClicked(object sender, MouseButtonEventArgs e)
+    private List<ClipboardEntry> VisibleEntries() =>
+        _view is null ? new List<ClipboardEntry>() : _view.Cast<object>().OfType<ClipboardEntry>().ToList();
+
+    /// <summary>当前多选条目，按列表顺序排列。</summary>
+    private List<ClipboardEntry> SelectedEntries()
     {
-        // whole card copies (mac: row is a Button)
-        if (_model is not null && ((FrameworkElement)sender).Tag is ClipboardEntry entry)
-            _model.ClipboardMonitor.CopyToClipboard(entry);
+        var chosen = EntryList.SelectedItems.OfType<ClipboardEntry>().ToHashSet();
+        return VisibleEntries().Where(chosen.Contains).ToList();
     }
+
+    private void SelectOnly(ClipboardEntry entry)
+    {
+        EntryList.SelectedItems.Clear();
+        EntryList.SelectedItem = entry;
+    }
+
+    private void Activate(ClipboardEntry entry)
+    {
+        if (_model is null) return;
+        if (_model.SettingsStore.Settings.PasteAfterSelect) _ = _model.Paste.PasteAsync(entry);
+        else _model.Paste.CopyOnly(entry);
+    }
+
+    private static bool IsFromButton(object? source)
+    {
+        for (var d = source as DependencyObject; d is not null; d = VisualTreeHelper.GetParent(d))
+            if (d is ButtonBase) return true;
+        return false;
+    }
+
+    // ── mouse ──
+
+    private void OnItemPreviewLeftDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not ListBoxItem { DataContext: ClipboardEntry entry }) return;
+        if (IsFromButton(e.OriginalSource)) return;
+
+        // Shift+单击 = 仅复制：拦下来，别让 ListBox 做区间选择
+        if ((Keyboard.Modifiers & ModifierKeys.Shift) == ModifierKeys.Shift)
+        {
+            e.Handled = true;
+            SelectOnly(entry);
+            _model?.Paste.CopyOnly(entry);
+        }
+        // Ctrl+单击交给 ListBox 自己切换选中；普通单击也走默认单选
+    }
+
+    private void OnItemLeftUp(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not ListBoxItem { DataContext: ClipboardEntry entry }) return;
+        if (IsFromButton(e.OriginalSource)) return;
+        if ((Keyboard.Modifiers & (ModifierKeys.Shift | ModifierKeys.Control)) != ModifierKeys.None) return;
+        e.Handled = true;
+        Activate(entry);
+    }
+
+    private void OnItemPreviewRightDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not ListBoxItem { DataContext: ClipboardEntry entry } item) return;
+        // 右键点在选区外时先切成单选，菜单才对得上
+        if (!EntryList.SelectedItems.Contains(entry)) SelectOnly(entry);
+        item.ContextMenu ??= new ContextMenu();
+    }
+
+    private void OnItemContextMenuOpening(object sender, ContextMenuEventArgs e)
+    {
+        if (_model is null || sender is not ListBoxItem { DataContext: ClipboardEntry entry } item) return;
+        var menu = item.ContextMenu ??= new ContextMenu();
+        menu.Items.Clear();
+        menu.Closed -= OnContextMenuClosed;
+        menu.Closed += OnContextMenuClosed;
+        BuildEntryMenu(menu, entry);
+    }
+
+    private void OnContextMenuClosed(object sender, RoutedEventArgs e) => FocusSearch();
+
+    // ── context menu ──
+
+    private void BuildEntryMenu(ContextMenu menu, ClipboardEntry entry)
+    {
+        if (_model is null) return;
+        var model = _model;
+        var selection = SelectedEntries();
+        bool isText = entry.Kind == ClipboardEntryKind.Text;
+        bool isFile = entry.Kind == ClipboardEntryKind.File;
+        bool isImage = entry.Kind == ClipboardEntryKind.Image;
+
+        Add(menu, "粘贴", "\uE77F", () =>
+        {
+            if (selection.Count > 1) _ = model.Paste.PasteManyAsync(selection);
+            else _ = model.Paste.PasteAsync(entry);
+        });
+        Add(menu, "仅复制", "\uE8C8", () =>
+        {
+            if (selection.Count > 1) model.Paste.CopyMany(selection);
+            else model.Paste.CopyOnly(entry);
+        });
+        if (isText) Add(menu, "粘贴为纯文本", "\uE8D2", () => _ = model.Paste.PasteAsync(entry, new Services.PasteOptions(Plain: true)));
+        Add(menu, entry.IsFavorite ? "取消收藏" : "收藏", entry.IsFavorite ? "\uE735" : "\uE734",
+            () => model.ClipboardStore.ToggleFavorite(entry));
+        if (isText) Add(menu, "编辑文本…", "\uE70F", () => OpenEdit(entry));
+        if (isFile)
+        {
+            Add(menu, "打开所在文件夹", "\uE838", () => RevealInExplorer(entry));
+            Add(menu, "复制路径", "\uE71B", () => model.ClipboardMonitor.CopyText(string.Join(Environment.NewLine, entry.FilePaths)));
+        }
+        if (isImage) Add(menu, "图片另存为…", "\uE792", () => SaveImageAs(entry));
+
+        // 扩展点：OCR / AI 等能力挂上来的动作
+        var extras = model.EntryActionProviders
+            .SelectMany(p =>
+            {
+                try { return p.ActionsFor(entry, selection); }
+                catch { return Enumerable.Empty<EntryAction>(); }
+            })
+            .Where(a =>
+            {
+                try { return a.IsVisible(entry); }
+                catch { return false; }
+            })
+            .OrderBy(a => a.Order)
+            .ToList();
+        if (extras.Count > 0)
+        {
+            menu.Items.Add(new Separator());
+            foreach (var action in extras)
+            {
+                var captured = action;
+                Add(menu, captured.Header, captured.Icon, () =>
+                {
+                    try { captured.Execute(entry); }
+                    catch { /* 扩展动作不能拖垮菜单 */ }
+                }, captured.IsDanger);
+            }
+        }
+
+        menu.Items.Add(new Separator());
+        Add(menu, selection.Count > 1 ? $"删除 {selection.Count} 条" : "删除", "\uE711", () =>
+        {
+            foreach (var item in selection.Count > 1 ? selection : new List<ClipboardEntry> { entry })
+                model.ClipboardStore.Remove(item);
+        }, danger: true);
+    }
+
+    private void Add(ContextMenu menu, string header, string? glyph, Action execute, bool danger = false)
+    {
+        var brush = danger ? "Brush.Danger" : "Brush.TextPrimary";
+        var panel = new StackPanel { Orientation = Orientation.Horizontal };
+        if (!string.IsNullOrEmpty(glyph))
+        {
+            var icon = new TextBlock
+            {
+                Text = glyph,
+                FontFamily = (FontFamily)FindResource("Font.Icon"),
+                FontSize = 11,
+                Width = 16,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            icon.SetResourceReference(ForegroundProperty, brush);
+            panel.Children.Add(icon);
+        }
+        var text = new TextBlock { Text = header, Margin = new Thickness(6, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+        text.SetResourceReference(ForegroundProperty, brush);
+        panel.Children.Add(text);
+
+        var menuItem = new MenuItem { Header = panel, Style = (Style)FindResource("MenuItem.Flat") };
+        menuItem.Click += (_, _) => execute();
+        menu.Items.Add(menuItem);
+    }
+
+    private void RevealInExplorer(ClipboardEntry entry)
+    {
+        string? path = entry.FirstFilePath;
+        if (string.IsNullOrEmpty(path)) return;
+        try
+        {
+            if (File.Exists(path) || Directory.Exists(path))
+                Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true });
+        }
+        catch
+        {
+            // 路径已失效
+        }
+    }
+
+    private void SaveImageAs(ClipboardEntry entry)
+    {
+        if (string.IsNullOrEmpty(entry.ImagePath) || !File.Exists(entry.ImagePath)) return;
+        try
+        {
+            var dlg = new Microsoft.Win32.SaveFileDialog
+            {
+                Filter = "PNG 图片|*.png",
+                Title = "图片另存为",
+                FileName = $"WinFinger-{entry.CreatedAt:yyyyMMdd-HHmmss}.png"
+            };
+            // 岛是 NOACTIVATE，对话框需要一个可激活的临时 owner
+            if (DialogOwner.WithOwner(owner => dlg.ShowDialog(owner)) != true) return;
+            File.Copy(entry.ImagePath, dlg.FileName, overwrite: true);
+        }
+        catch
+        {
+            // 磁盘写入失败：静默忽略，不打断面板
+        }
+    }
+
+    // ── edit popup ──
+
+    private void OpenEdit(ClipboardEntry entry)
+    {
+        _editingEntry = entry;
+        EditBox.Text = entry.Text ?? "";
+        EditPopup.PlacementTarget = EntryList;
+        EditPopup.IsOpen = true;
+        Dispatcher.BeginInvoke(DispatcherPriority.Input, () =>
+        {
+            EditBox.Focus();
+            EditBox.CaretIndex = EditBox.Text.Length;
+        });
+    }
+
+    private void CommitEdit()
+    {
+        if (_editingEntry is not null && _model is not null)
+            _model.ClipboardStore.UpdateText(_editingEntry, EditBox.Text);
+        CloseEdit();
+    }
+
+    private void CloseEdit()
+    {
+        EditPopup.IsOpen = false;
+        _editingEntry = null;
+        FocusSearch();
+    }
+
+    // ── keyboard (shared by the search box and the list) ──
+
+    private void HandleListKey(KeyEventArgs e)
+    {
+        if (_model is null) return;
+        if (e.Key == Key.ImeProcessed) return; // 输入法组词中，键全部放行
+        var model = _model;
+        var visible = VisibleEntries();
+        bool inList = EntryList.IsKeyboardFocusWithin;
+        bool ctrl = (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control;
+        bool shift = (Keyboard.Modifiers & ModifierKeys.Shift) == ModifierKeys.Shift;
+        var current = EntryList.SelectedItem as ClipboardEntry;
+
+        switch (e.Key)
+        {
+            case Key.Down or Key.Up when visible.Count > 0:
+            {
+                e.Handled = true;
+                int index = current is null ? -1 : visible.IndexOf(current);
+                int next = e.Key == Key.Down
+                    ? (index < 0 ? 0 : Math.Min(index + 1, visible.Count - 1))
+                    : (index <= 0 ? 0 : index - 1);
+                SelectOnly(visible[next]);
+                EntryList.ScrollIntoView(visible[next]);
+                return;
+            }
+            case Key.Enter:
+            {
+                var selection = SelectedEntries();
+                var target = current ?? visible.FirstOrDefault();
+                if (ctrl)
+                {
+                    if (selection.Count > 1) model.Paste.CopyMany(selection);
+                    else if (shift && target is not null) model.Paste.CopyOnly(target, plain: true);
+                    else if (target is not null) model.Paste.CopyOnly(target);
+                    else return;
+                }
+                else if (selection.Count > 1) _ = model.Paste.PasteManyAsync(selection);
+                else if (target is not null) _ = model.Paste.PasteAsync(target);
+                else return;
+                e.Handled = true;
+                return;
+            }
+            case Key.Delete when inList || SearchBox.Text.Length == 0:
+            {
+                var selection = SelectedEntries();
+                if (selection.Count == 0) return;
+                e.Handled = true;
+                foreach (var entry in selection) model.ClipboardStore.Remove(entry);
+                EntryList.SelectedIndex = -1;
+                return;
+            }
+            case Key.F or Key.D when ctrl:
+            {
+                var selection = SelectedEntries();
+                if (selection.Count == 0) return;
+                e.Handled = true;
+                foreach (var entry in selection) model.ClipboardStore.ToggleFavorite(entry);
+                return;
+            }
+            case Key.C when ctrl && shift:
+            {
+                var target = current ?? visible.FirstOrDefault();
+                if (target is null) return;
+                e.Handled = true;
+                model.Paste.CopyOnly(target, plain: true);
+                return;
+            }
+            case Key.Space when inList:
+            {
+                if (current is null) return;
+                e.Handled = true;
+                if (EntryList.SelectedItems.Contains(current)) EntryList.SelectedItems.Remove(current);
+                else EntryList.SelectedItems.Add(current);
+                return;
+            }
+        }
+        // 其余按键（字母、空格、退格、左右方向键、Esc、Ctrl+1..5）交给搜索框和窗口
+    }
+
+    // ── row actions ──
 
     private void OnCopyEntry(object sender, RoutedEventArgs e)
     {
         e.Handled = true;
         if (_model is not null && ((FrameworkElement)sender).Tag is ClipboardEntry entry)
-            _model.ClipboardMonitor.CopyToClipboard(entry);
+            _model.Paste.CopyOnly(entry);
     }
 
     private void OnToggleFavorite(object sender, RoutedEventArgs e)
@@ -180,7 +576,7 @@ public partial class ClipboardPage : UserControl, IIslandPage
     private void ShowPreview()
     {
         if (_hoverTarget?.Tag is not ClipboardEntry entry || string.IsNullOrEmpty(entry.ImagePath) ||
-            !System.IO.File.Exists(entry.ImagePath)) return;
+            !File.Exists(entry.ImagePath)) return;
         try
         {
             var image = new BitmapImage();
@@ -206,7 +602,7 @@ public partial class ClipboardPage : UserControl, IIslandPage
     private void OnThumbClicked(object sender, MouseButtonEventArgs e)
     {
         if (((FrameworkElement)sender).Tag is not ClipboardEntry { Kind: ClipboardEntryKind.Image } entry ||
-            string.IsNullOrEmpty(entry.ImagePath) || !System.IO.File.Exists(entry.ImagePath)) return;
+            string.IsNullOrEmpty(entry.ImagePath) || !File.Exists(entry.ImagePath)) return;
         e.Handled = true;
         PreviewPopup.IsOpen = false;
         try

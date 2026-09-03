@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 using WinFinger.Services;
 using WinFinger.ViewModels;
 
@@ -18,6 +19,8 @@ public partial class AppearanceWindow : Window
 
     private readonly AppViewModel _model;
     private readonly IslandWindow _island;
+    private readonly DispatcherTimer _saveTimer;
+    private bool _savePending;
     private bool _loading = true;
 
     public AppearanceWindow(AppViewModel model, IslandWindow island)
@@ -25,6 +28,10 @@ public partial class AppearanceWindow : Window
         _model = model;
         _island = island;
         InitializeComponent();
+        // 滑块每帧都会触发 ValueChanged：预览立即生效，落盘去抖 400ms
+        _saveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
+        _saveTimer.Tick += (_, _) => FlushSave();
+        Closed += (_, _) => FlushSave();
         BuildSwatches();
         LoadFromSettings();
         _loading = false;
@@ -179,10 +186,22 @@ public partial class AppearanceWindow : Window
         SaveAndApply();
     }
 
+    /// <summary>预览立即刷新，设置文件的写入排到去抖计时器里。</summary>
     private void SaveAndApply()
     {
-        _model.SettingsStore.Save();
         _island.ApplyBackground();
+        _savePending = true;
+        _saveTimer.Stop();
+        _saveTimer.Start();
+    }
+
+    /// <summary>把挂起的保存立刻落盘（去抖到期 / 窗口关闭）。</summary>
+    private void FlushSave()
+    {
+        _saveTimer.Stop();
+        if (!_savePending) return;
+        _savePending = false;
+        _model.SettingsStore.Save();
     }
 
     private void SetHexUi(string hex)

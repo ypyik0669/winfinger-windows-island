@@ -1084,11 +1084,7 @@ public partial class IslandWindow : Window
                 Dispatcher.BeginInvoke(() =>
                 {
                     if (!_model.IsExpanded || _model.IsExpandedPinned || _resizing) return; // mac: pinned panels stay open
-                    // PointToScreen yields device pixels — same space as the hook's point.
-                    var topLeft = IslandBorder.PointToScreen(new Point(0, 0));
-                    var bottomRight = IslandBorder.PointToScreen(new Point(IslandBorder.ActualWidth, IslandBorder.ActualHeight));
-                    var bounds = new Rect(topLeft, bottomRight);
-                    if (!bounds.Contains(screenPoint))
+                    if (!IsOwnWindowAt(screenPoint, data.pt))
                     {
                         // 焦点已经被用户点走了，收起时不能再把前台抢回旧窗口
                         _model.FocusRestore.Forget();
@@ -1098,5 +1094,24 @@ public partial class IslandWindow : Window
             }
         }
         return NativeMethods.CallNextHookEx(_mouseHook, nCode, wParam, lParam);
+    }
+
+    /// <summary>点在本进程任意窗口上（岛、右键菜单、Popup、灯箱）都算"内部"，不触发收起。</summary>
+    private bool IsOwnWindowAt(Point screenPoint, NativeMethods.POINT rawPoint)
+    {
+        IntPtr hit = NativeMethods.WindowFromPoint(rawPoint);
+        if (hit != IntPtr.Zero)
+        {
+            IntPtr root = NativeMethods.GetAncestor(hit, NativeMethods.GA_ROOT);
+            if (root == IntPtr.Zero) root = hit;
+            NativeMethods.GetWindowThreadProcessId(root, out uint pid);
+            if (pid == (uint)Environment.ProcessId) return true;
+            return false;
+        }
+
+        // WindowFromPoint 失手时回退到岛的矩形（PointToScreen 与钩子同为设备像素）
+        var topLeft = IslandBorder.PointToScreen(new Point(0, 0));
+        var bottomRight = IslandBorder.PointToScreen(new Point(IslandBorder.ActualWidth, IslandBorder.ActualHeight));
+        return new Rect(topLeft, bottomRight).Contains(screenPoint);
     }
 }

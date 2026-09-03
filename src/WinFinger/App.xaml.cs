@@ -143,9 +143,13 @@ public partial class App : Application
         pauseItem.Click += (_, _) => Model.ClipboardMonitor.IsPaused = pauseItem.IsChecked;
         menu.Items.Add(pauseItem);
 
-        var clearItem = new System.Windows.Controls.MenuItem { Header = "清空剪贴板历史" };
-        clearItem.Click += (_, _) => Model.ClipboardStore.Clear(includeFavorites: false);
-        menu.Items.Add(clearItem);
+        var clearKeepItem = new System.Windows.Controls.MenuItem { Header = "清空历史（保留收藏）" };
+        clearKeepItem.Click += (_, _) => Model.ClipboardStore.Clear(includeFavorites: false);
+        menu.Items.Add(clearKeepItem);
+
+        var clearAllItem = new System.Windows.Controls.MenuItem { Header = "全部清空…" };
+        clearAllItem.Click += (_, _) => ConfirmClearAll();
+        menu.Items.Add(clearAllItem);
 
         var bgMenu = new System.Windows.Controls.MenuItem { Header = "岛背景" };
         var bgGlass = new System.Windows.Controls.MenuItem { Header = "动态玻璃" };
@@ -203,29 +207,25 @@ public partial class App : Application
             };
             // the island window is NOACTIVATE and the tray menu's host is transient,
             // so the dialog needs a real activatable owner or it can't take focus
-            var owner = new Window
-            {
-                WindowStyle = WindowStyle.None,
-                AllowsTransparency = true,
-                Opacity = 0,
-                ShowInTaskbar = false,
-                Width = 1,
-                Height = 1,
-                Topmost = true,
-                WindowStartupLocation = WindowStartupLocation.CenterScreen
-            };
-            owner.Show();
-            owner.Activate();
-            try
-            {
-                if (dlg.ShowDialog(owner) != true) return;
-            }
-            finally
-            {
-                owner.Close();
-            }
+            if (DialogOwner.WithOwner(owner => dlg.ShowDialog(owner)) != true) return;
             Model.SettingsStore.Settings.BackgroundImagePath = dlg.FileName;
             SetBackground("image", null);
+        }
+        catch (Exception ex)
+        {
+            LogCrash(ex);
+        }
+    }
+
+    /// <summary>"全部清空"：连收藏一起删，先确认。</summary>
+    private void ConfirmClearAll()
+    {
+        try
+        {
+            var result = DialogOwner.WithOwner(owner => MessageBox.Show(owner,
+                "将删除全部剪贴板记录，包括收藏项。确定继续吗？", "全部清空",
+                MessageBoxButton.YesNo, MessageBoxImage.Warning));
+            if (result == MessageBoxResult.Yes) Model.ClipboardStore.Clear(includeFavorites: true);
         }
         catch (Exception ex)
         {
