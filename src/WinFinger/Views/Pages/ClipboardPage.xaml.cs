@@ -130,20 +130,20 @@ public partial class ClipboardPage : UserControl, IIslandPage
 
         // 动作框架：抽屉 → 执行器 → 右键菜单扩展点（Initialize 可能被调用多次，事件只挂一遍）
         Services.ActionCatalogService.Current = model.Actions;
-        Drawer.Attach(model);
-        model.AttachPresenter(Drawer);
         if (!_actionsWired)
         {
             _actionsWired = true;
+            Drawer.Attach(model);
+            model.AttachPresenter(Drawer);
             if (!model.EntryActionProviders.OfType<Services.CatalogActionProvider>().Any())
                 model.EntryActionProviders.Add(new Services.CatalogActionProvider(model.Actions, () => model.Executor));
             model.Actions.Changed += () => Dispatcher.BeginInvoke(new Action(RefreshFilter));
             // OCR / 内容类型变了，内联动作要跟着换：去抖后再刷，别打断后台识别时的滚动与选中
             model.ClipboardStore.EntryChanged += _ => _entryChangedTimer.Start();
+            model.ClipboardStore.Entries.CollectionChanged += OnEntriesChanged;
+            model.ClipboardStore.FavoriteChanged += _ => RefreshFilter();
         }
 
-        model.ClipboardStore.Entries.CollectionChanged += OnEntriesChanged;
-        model.ClipboardStore.FavoriteChanged += _ => RefreshFilter();
         RefreshPauseButton();
         RefreshFilter();
     }

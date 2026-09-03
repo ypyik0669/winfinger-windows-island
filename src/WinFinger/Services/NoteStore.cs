@@ -71,10 +71,14 @@ public sealed class NoteStore
             foreach (var note in decoded.OrderByDescending(n => n.IsPinned).ThenByDescending(n => n.UpdatedAt))
                 Notes.Add(note);
         }
-        catch
+        catch (Exception ex) when (AtomicJson.IsCorruptionError(ex))
         {
             // 文件存在但解析失败：先改名保留现场，避免后续 Save 把损坏内容悄悄覆盖
             TryMarkCorrupt(StoragePaths.NotesJson);
+        }
+        catch
+        {
+            // 瞬时 I/O 失败（文件被杀软/备份占用等）：文件本身健康，不动它，本次会话退回空列表
         }
     }
 

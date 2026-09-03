@@ -209,7 +209,9 @@ public sealed partial class ClipboardMonitorService : ObservableObject
             _ignoreKind = null;
             return false;
         }
-        if (_ignoreHash != hash && _ignoreKind != kind) return false;
+        bool hashMatch = _ignoreHash == hash;
+        bool kindMatch = _ignoreKind is not null && _ignoreKind == kind;
+        if (!hashMatch && !kindMatch) return false;
         _ignoreHash = null;
         _ignoreKind = null;
         return true;

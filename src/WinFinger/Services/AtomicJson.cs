@@ -25,4 +25,10 @@ public static class AtomicJson
             return default;
         }
     }
+
+    /// <summary>
+    /// 判断异常是否表示 JSON 内容本身已损坏（应改名为 .corrupt 保留现场），
+    /// 而不是文件被杀软/备份等短暂占用的瞬时 I/O 失败（不应动这个文件，本次会话退回默认值即可）。
+    /// </summary>
+    public static bool IsCorruptionError(Exception ex) => ex is JsonException or NotSupportedException;
 }

@@ -41,7 +41,6 @@ public sealed class PasteService
         IsBusy = true;
         try
         {
-            _store.Touch(entry);
             if (entry.Kind == ClipboardEntryKind.File &&
                 !entry.FilePaths.Any(p => File.Exists(p) || Directory.Exists(p)))
             {
@@ -49,6 +48,7 @@ public sealed class PasteService
                 return false;
             }
 
+            _store.Touch(entry);
             if (o.Plain) _monitor.CopyPlainText(entry);
             else _monitor.CopyToClipboard(entry);
 
@@ -73,7 +73,11 @@ public sealed class PasteService
             .Select(e => e.Text!)
             .ToList();
         if (texts.Count == 0)
-            return entries.Count == 1 ? await PasteAsync(entries[0], options).ConfigureAwait(true) : false;
+        {
+            if (entries.Count == 1) return await PasteAsync(entries[0], options).ConfigureAwait(true);
+            _notifications.Post("📋", "只能批量粘贴文本条目");
+            return false;
+        }
 
         if (IsBusy) return false;
         var o = options ?? new PasteOptions();

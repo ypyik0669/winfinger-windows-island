@@ -7,7 +7,7 @@ public enum ActionRunKind
 {
     /// <summary>open: 用系统默认程序打开（URL / mailto / 路径）。</summary>
     Open,
-    /// <summary>shell: 交给 cmd.exe /c 执行。</summary>
+    /// <summary>shell: 启动一个进程，不经过 cmd.exe（模板先切分为参数再展开占位符，走 ProcessStartInfo.ArgumentList）。</summary>
     Shell,
     /// <summary>builtin: 内置能力（json-format、ocr、qr-encode…）。</summary>
     Builtin,
