@@ -7,6 +7,10 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{0E74E396-6C7
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WinFinger", "src\WinFinger\WinFinger.csproj", "{108BAE50-8654-4CC4-A4D8-6951F180DD54}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{8BC6EE7C-BD9A-467F-8553-528B1D969F6E}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WinFinger.Tests", "tests\WinFinger.Tests\WinFinger.Tests.csproj", "{E53BCD55-0E33-452D-B446-98C96D32055C}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -20,8 +24,13 @@ Global
 		{108BAE50-8654-4CC4-A4D8-6951F180DD54}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{108BAE50-8654-4CC4-A4D8-6951F180DD54}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{108BAE50-8654-4CC4-A4D8-6951F180DD54}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E53BCD55-0E33-452D-B446-98C96D32055C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E53BCD55-0E33-452D-B446-98C96D32055C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E53BCD55-0E33-452D-B446-98C96D32055C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E53BCD55-0E33-452D-B446-98C96D32055C}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{108BAE50-8654-4CC4-A4D8-6951F180DD54} = {0E74E396-6C7C-4F4B-AF3D-BC0FBD23E2EC}
+		{E53BCD55-0E33-452D-B446-98C96D32055C} = {8BC6EE7C-BD9A-467F-8553-528B1D969F6E}
 	EndGlobalSection
 EndGlobal
