@@ -78,6 +78,7 @@ public sealed partial class AppViewModel : ObservableObject
     /// <summary>自动 OCR 串行队列（一次只跑一张图，避免 CPU 抖动）。</summary>
     private readonly SemaphoreSlim _autoOcrGate = new(1, 1);
     private readonly CancellationTokenSource _autoOcrCts = new();
+    private volatile bool _autoOcrStopped;
 
     /// <summary>剪贴板条目动作扩展点：OCR / AI 等能力在这里注册自己的菜单项。</summary>
     public ObservableCollection<IEntryActionProvider> EntryActionProviders { get; } = new();
@@ -159,14 +160,20 @@ public sealed partial class AppViewModel : ObservableObject
 
     private async Task QueueAutoOcrAsync(Models.ClipboardEntry entry)
     {
-        var token = _autoOcrCts.Token;
+        CancellationToken token;
         try
         {
+            if (_autoOcrStopped) return;
+            token = _autoOcrCts.Token;
             await _autoOcrGate.WaitAsync(token);
         }
         catch (OperationCanceledException)
         {
             return;
+        }
+        catch (ObjectDisposedException)
+        {
+            return; // 已退出
         }
         try
         {
@@ -184,7 +191,14 @@ public sealed partial class AppViewModel : ObservableObject
         }
         finally
         {
-            _autoOcrGate.Release();
+            try
+            {
+                _autoOcrGate.Release();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Stop() 已释放，无需归还
+            }
         }
     }
 
@@ -225,7 +239,10 @@ public sealed partial class AppViewModel : ObservableObject
 
     public void Stop()
     {
+        _autoOcrStopped = true;
         _autoOcrCts.Cancel();
+        _autoOcrCts.Dispose();
+        _autoOcrGate.Dispose();
         Theme.Stop();
         Metrics.Stop();
         ForegroundApp.Stop();

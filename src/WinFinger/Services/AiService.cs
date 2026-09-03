@@ -44,6 +44,10 @@ public sealed class AiService
     public const string TranslateSystemPrompt = "你是专业翻译，只输出译文，不解释。";
 
     private static readonly HttpClient Http = CreateClient();
+
+    /// <summary>设置为空白时的兜底值来源，避免在这里重复写一遍默认 BaseUrl/Model/超时。</summary>
+    private static readonly AppSettings Defaults = new();
+
     private readonly SettingsService _settings;
 
     public AiService(SettingsService settings) => _settings = settings;
@@ -70,7 +74,7 @@ public sealed class AiService
         if (string.IsNullOrWhiteSpace(key)) throw new AiException("未配置 API Key");
 
         var cfg = _settings.Settings;
-        int timeout = cfg.AiTimeoutSeconds > 0 ? cfg.AiTimeoutSeconds : 60;
+        int timeout = cfg.AiTimeoutSeconds > 0 ? cfg.AiTimeoutSeconds : Defaults.AiTimeoutSeconds;
 
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
         linked.CancelAfter(TimeSpan.FromSeconds(timeout));
@@ -161,7 +165,7 @@ public sealed class AiService
         if (string.IsNullOrWhiteSpace(key)) return (false, "未配置 API Key");
 
         var cfg = _settings.Settings;
-        int timeout = cfg.AiTimeoutSeconds > 0 ? cfg.AiTimeoutSeconds : 60;
+        int timeout = cfg.AiTimeoutSeconds > 0 ? cfg.AiTimeoutSeconds : Defaults.AiTimeoutSeconds;
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
         linked.CancelAfter(TimeSpan.FromSeconds(timeout));
         var token = linked.Token;
@@ -277,11 +281,11 @@ public sealed class AiService
         string userPrompt, bool stream, int? maxTokens = null)
     {
         string baseUrl = (cfg.AiBaseUrl ?? "").Trim().TrimEnd('/');
-        if (baseUrl.Length == 0) baseUrl = "https://api.openai.com/v1";
+        if (baseUrl.Length == 0) baseUrl = Defaults.AiBaseUrl.TrimEnd('/');
 
         var payload = new Dictionary<string, object?>
         {
-            ["model"] = string.IsNullOrWhiteSpace(cfg.AiModel) ? "gpt-4o-mini" : cfg.AiModel,
+            ["model"] = string.IsNullOrWhiteSpace(cfg.AiModel) ? Defaults.AiModel : cfg.AiModel,
             ["stream"] = stream,
             ["temperature"] = 0.3,
             ["messages"] = new object[]

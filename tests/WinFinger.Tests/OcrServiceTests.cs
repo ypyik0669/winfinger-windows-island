@@ -41,6 +41,41 @@ public class OcrServiceTests
     }
 
     [Fact]
+    public async Task RecognizeAsync_UninstalledExplicitLanguage_ReturnsNoEngineWithoutSubstituting()
+    {
+        var svc = new OcrService();
+        var png = TestImages.SolidPng(48, 48, 255, 255, 255);
+        // 一个几乎不可能装了 OCR 语言包的标签：绝不能悄悄退回用户配置语言
+        var result = await svc.RecognizeAsync(png, "xx-ZZ", CancellationToken.None);
+        Assert.Null(result);
+        Assert.Equal(OcrStatus.NoEngine, svc.LastStatus);
+
+        // 负缓存后再调一次仍是同样结果（不会因缓存到别的引擎而变成 Done）
+        var again = await svc.RecognizeAsync(png, "xx-ZZ", CancellationToken.None);
+        Assert.Null(again);
+        Assert.Equal(OcrStatus.NoEngine, svc.LastStatus);
+    }
+
+    [Fact]
+    public async Task RecognizeAsync_ConcurrentCalls_AreSerializedAndDoNotThrow()
+    {
+        var svc = new OcrService();
+        var png = TestImages.SolidPng(64, 64, 255, 255, 255);
+        var tasks = Enumerable.Range(0, 6)
+            .Select(_ => svc.RecognizeAsync(png, null, CancellationToken.None))
+            .ToArray();
+        await Task.WhenAll(tasks);
+        Assert.True(svc.LastStatus is OcrStatus.Done or OcrStatus.NoEngine);
+    }
+
+    [Fact]
+    public void IsAvailable_IsStableAcrossCalls()
+    {
+        var svc = new OcrService();
+        Assert.Equal(svc.IsAvailable, svc.IsAvailable);
+    }
+
+    [Fact]
     public async Task RecognizeAsync_SolidImage_DoesNotThrow()
     {
         var svc = new OcrService();

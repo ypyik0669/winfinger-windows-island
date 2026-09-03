@@ -58,6 +58,21 @@ public class QrServiceTests
     }
 
     [Fact]
+    public async Task Decode_LargeImage_DownscalesAndStillDecodes()
+    {
+        // 2000px > 1600px 上限，走 TransformedBitmap 缩小分支；同时验证脱离 UI 线程可用
+        var png = QrService.EncodePng("big-qr-payload", 2000);
+        var source = new System.IO.MemoryStream(png);
+        var frame = System.Windows.Media.Imaging.BitmapFrame.Create(source,
+            System.Windows.Media.Imaging.BitmapCreateOptions.PreservePixelFormat,
+            System.Windows.Media.Imaging.BitmapCacheOption.OnLoad);
+        Assert.True(Math.Max(frame.PixelWidth, frame.PixelHeight) > 1600);
+
+        var text = await Task.Run(() => QrService.Decode(png));
+        Assert.Equal("big-qr-payload", text);
+    }
+
+    [Fact]
     public async Task Decode_WorksOffTheUiThread()
     {
         var png = QrService.EncodePng("off-thread");

@@ -39,30 +39,39 @@ public sealed partial class OcrService : ObservableObject
 
     [ObservableProperty] private OcrStatus _status = OcrStatus.Idle;
 
-    private readonly SemaphoreSlim _engineLock = new(1, 1);
+    /// <summary>
+    /// 全局串行闸门：OCR 引擎不是线程安全的，所以整个识别流程（引擎创建 + 解码 + 识别）都在这把锁内执行。
+    /// 副作用是同一时刻只有一次识别在跑，<see cref="Status"/> / <see cref="LastStatus"/> 因此不会被并发调用互相覆盖。
+    /// </summary>
+    private readonly SemaphoreSlim _gate = new(1, 1);
+
+    /// <summary>引擎缓存（含创建失败的 null 负缓存），仅在 <see cref="_gate"/> 内访问。</summary>
     private readonly Dictionary<string, OcrEngine?> _engines = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>上一次识别的结束状态（后台线程可读，UI 请用 <see cref="Status"/>）。</summary>
+    /// <summary>IsAvailable 的惰性缓存：语言包安装需要重启会话才生效，进程内不会变。</summary>
+    private bool? _isAvailable;
+
+    /// <summary>最近一次「已完成」识别的结束状态（后台线程可读，UI 请用 <see cref="Status"/>）。识别是串行的，不存在互相覆盖。</summary>
     public OcrStatus LastStatus { get; private set; } = OcrStatus.Idle;
 
-    /// <summary>系统是否至少能创建出一个 OCR 引擎。</summary>
+    /// <summary>系统是否至少能创建出一个 OCR 引擎（结果缓存，进程内只探测一次）。</summary>
     public bool IsAvailable
     {
         get
         {
+            if (_isAvailable is { } cached) return cached;
+            bool available = false;
             try
             {
-                if (OcrEngine.TryCreateFromUserProfileLanguages() is not null) return true;
-                foreach (var tag in FallbackTags)
-                {
-                    if (TryCreateFromTag(tag) is not null) return true;
-                }
+                available = OcrEngine.TryCreateFromUserProfileLanguages() is not null
+                            || FallbackTags.Any(tag => TryCreateFromTag(tag) is not null);
             }
             catch
             {
                 // WinRT 不可用（缺组件 / 精简版系统）时按不可用处理
             }
-            return false;
+            _isAvailable = available;
+            return available;
         }
     }
 
@@ -91,16 +100,34 @@ public sealed partial class OcrService : ObservableObject
 
     private async Task<OcrResult?> RecognizeCoreAsync(byte[] png, string? langHint, CancellationToken ct)
     {
+        // 整个识别流程串行：引擎非线程安全，同时也保证 Status/LastStatus 是单次调用的结果
+        try
+        {
+            await _gate.WaitAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
+
+        try
+        {
+            return await RecognizeLockedAsync(png, langHint, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>已持有 <see cref="_gate"/> 时的识别主体。</summary>
+    private async Task<OcrResult?> RecognizeLockedAsync(byte[] png, string? langHint, CancellationToken ct)
+    {
         SetStatus(OcrStatus.Running);
         OcrEngine? engine;
         try
         {
-            engine = await ResolveEngineAsync(langHint, ct).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            SetStatus(OcrStatus.Idle);
-            return null;
+            engine = ResolveEngine(langHint);
         }
         catch
         {
@@ -177,57 +204,47 @@ public sealed partial class OcrService : ObservableObject
         return result;
     }
 
-    private async Task<OcrEngine?> ResolveEngineAsync(string? langHint, CancellationToken ct)
+    /// <summary>
+    /// 解析语言标签对应的引擎（调用方必须已持有 <see cref="_gate"/>）。
+    /// 显式语言绝不做静默替换：装不上就返回 null（→ NoEngine + <see cref="UnavailableMessage"/> 引导装语言包），
+    /// 并把 null 一起写进缓存作为负缓存，避免每次识别都重试创建。
+    /// </summary>
+    private OcrEngine? ResolveEngine(string? langHint)
     {
-        string key = string.IsNullOrWhiteSpace(langHint) || langHint.Equals("auto", StringComparison.OrdinalIgnoreCase)
-            ? "auto"
-            : langHint.Trim();
+        bool auto = string.IsNullOrWhiteSpace(langHint)
+                    || langHint.Trim().Equals("auto", StringComparison.OrdinalIgnoreCase);
+        string key = auto ? "auto" : langHint!.Trim();
 
-        await _engineLock.WaitAsync(ct).ConfigureAwait(false);
+        if (_engines.TryGetValue(key, out var cached)) return cached;
+
+        OcrEngine? engine;
+        if (auto)
+        {
+            engine = TryCreateFromUserProfile();
+            foreach (var tag in FallbackTags)
+            {
+                if (engine is not null) break;
+                engine = TryCreateFromTag(tag);
+            }
+        }
+        else
+        {
+            engine = TryCreateFromTag(key);
+        }
+
+        _engines[key] = engine;
+        return engine;
+    }
+
+    private static OcrEngine? TryCreateFromUserProfile()
+    {
         try
         {
-            if (_engines.TryGetValue(key, out var cached)) return cached;
-
-            OcrEngine? engine = null;
-            if (key == "auto")
-            {
-                try
-                {
-                    engine = OcrEngine.TryCreateFromUserProfileLanguages();
-                }
-                catch
-                {
-                    engine = null;
-                }
-                foreach (var tag in FallbackTags)
-                {
-                    if (engine is not null) break;
-                    engine = TryCreateFromTag(tag);
-                }
-            }
-            else
-            {
-                engine = TryCreateFromTag(key);
-                // 指定语言没装时退回自动，避免直接失败
-                if (engine is null)
-                {
-                    try
-                    {
-                        engine = OcrEngine.TryCreateFromUserProfileLanguages();
-                    }
-                    catch
-                    {
-                        engine = null;
-                    }
-                }
-            }
-
-            _engines[key] = engine;
-            return engine;
+            return OcrEngine.TryCreateFromUserProfileLanguages();
         }
-        finally
+        catch
         {
-            _engineLock.Release();
+            return null;
         }
     }
 
@@ -247,11 +264,13 @@ public sealed partial class OcrService : ObservableObject
     private static async Task<SoftwareBitmap> DecodeAsync(byte[] png)
     {
         using var stream = new InMemoryRandomAccessStream();
-        var writer = new DataWriter(stream.GetOutputStreamAt(0));
-        writer.WriteBytes(png);
-        await writer.StoreAsync();
-        await writer.FlushAsync();
-        writer.DetachStream();
+        using (var writer = new DataWriter(stream.GetOutputStreamAt(0)))
+        {
+            writer.WriteBytes(png);
+            await writer.StoreAsync();
+            await writer.FlushAsync();
+            writer.DetachStream(); // 先解绑，Dispose 时才不会连带关掉底层流
+        }
         stream.Seek(0);
 
         var decoder = await BitmapDecoder.CreateAsync(stream);
