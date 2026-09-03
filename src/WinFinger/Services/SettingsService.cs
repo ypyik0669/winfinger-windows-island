@@ -1,4 +1,6 @@
 using System.IO;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Win32;
 
@@ -42,6 +44,21 @@ public sealed class AppSettings
     public string ClipboardHotkey { get; set; } = "Ctrl+Shift+V";
     public bool PasteAfterSelect { get; set; } = true;
     public int MaxTextLength { get; set; } = 524288;
+
+    // ── OCR / 截图 / AI ──
+    /// <summary>截图热键（避开系统的 Win+Shift+S）。</summary>
+    public string HotkeyScreenshot { get; set; } = "Ctrl+Shift+A";
+    /// <summary>截图并 OCR 的热键。</summary>
+    public string HotkeyScreenshotOcr { get; set; } = "Ctrl+Shift+T";
+    /// <summary>新图片进入历史时自动 OCR。</summary>
+    public bool OcrAutoOnNewImage { get; set; }
+    public string OcrLanguage { get; set; } = "auto";
+    public string AiBaseUrl { get; set; } = "https://api.openai.com/v1";
+    /// <summary>DPAPI(CurrentUser) 加密后再 base64 的 API Key，请用 GetAiApiKey/SetAiApiKey 存取。</summary>
+    public string AiApiKeyProtected { get; set; } = "";
+    public string AiModel { get; set; } = "gpt-4o-mini";
+    public string AiTargetLanguage { get; set; } = "auto";
+    public int AiTimeoutSeconds { get; set; } = 60;
 }
 
 /// <summary>settings.json persistence + the HKCU Run auto-start key.</summary>
@@ -70,6 +87,44 @@ public sealed class SettingsService
         {
             // best effort
         }
+    }
+
+    /// <summary>取出明文 API Key；未设置或解密失败（换机/换用户）返回 null，不抛异常。</summary>
+    public string? GetAiApiKey()
+    {
+        var protectedKey = Settings.AiApiKeyProtected;
+        if (string.IsNullOrWhiteSpace(protectedKey)) return null;
+        try
+        {
+            var plain = ProtectedData.Unprotect(Convert.FromBase64String(protectedKey), null, DataProtectionScope.CurrentUser);
+            return Encoding.UTF8.GetString(plain);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>写入 API Key（DPAPI CurrentUser 加密 + base64）；null/空表示清除。加密失败时同样清除，避免留下脏值。</summary>
+    public void SetAiApiKey(string? key)
+    {
+        if (string.IsNullOrEmpty(key))
+        {
+            Settings.AiApiKeyProtected = "";
+        }
+        else
+        {
+            try
+            {
+                var cipher = ProtectedData.Protect(Encoding.UTF8.GetBytes(key), null, DataProtectionScope.CurrentUser);
+                Settings.AiApiKeyProtected = Convert.ToBase64String(cipher);
+            }
+            catch
+            {
+                Settings.AiApiKeyProtected = "";
+            }
+        }
+        Save();
     }
 
     public void SetAutoStart(bool enabled)

@@ -22,10 +22,12 @@
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.3.2" />
     <PackageReference Include="Hardcodet.NotifyIcon.Wpf" Version="2.0.1" />
     <PackageReference Include="NAudio" Version="2.2.1" />
+    <PackageReference Include="ZXing.Net" Version="0.16.9" />
   </ItemGroup>
 
   <ItemGroup>
     <EmbeddedResource Include="Resources\shortcuts.json" />
+    <EmbeddedResource Include="Resources\actions.json" />
   </ItemGroup>
 
 </Project>

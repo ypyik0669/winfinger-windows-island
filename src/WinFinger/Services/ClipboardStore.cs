@@ -3,6 +3,7 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Threading;
@@ -26,7 +27,9 @@ public sealed class ClipboardStore
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
-        WriteIndented = true
+        WriteIndented = true,
+        // 可选字段（ocrText/contentType 等）为 null 时不写入，保持与 mac clipboard.json 兼容
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
     private readonly DispatcherTimer _saveTimer;
@@ -61,7 +64,8 @@ public sealed class ClipboardStore
         var entry = new ClipboardEntry(Guid.NewGuid(), ClipboardEntryKind.Text, text,
             null, sourceAppId, sourceApp, DateTime.Now, hash)
         {
-            IsTruncated = truncated
+            IsTruncated = truncated,
+            ContentType = ContentDetector.Detect(text)
         };
         Entries.Insert(0, entry);
         TrimAndSave();
@@ -204,13 +208,38 @@ public sealed class ClipboardStore
         };
         if (!kindOk) return false;
 
-        var needle = query.Trim();
+        // 支持 type:xxx 过滤词（可出现在查询任意位置，大小写不敏感；type:ocr 表示"已识别出文字"）
+        var words = query.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        var rest = new List<string>(words.Length);
+        foreach (var word in words)
+        {
+            if (word.StartsWith("type:", StringComparison.OrdinalIgnoreCase))
+            {
+                var wanted = word["type:".Length..];
+                if (wanted.Length == 0) continue;
+                if (wanted.Equals("ocr", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!entry.HasOcrText) return false;
+                }
+                else if (!string.Equals(entry.ContentType, wanted, StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+                continue;
+            }
+            rest.Add(word);
+        }
+
+        var needle = string.Join(" ", rest);
         if (needle.Length == 0) return true;
         var haystack = string.Join(" ", new[]
         {
             entry.DisplayTitle,
             entry.Text ?? "",
             entry.SourceAppName ?? "",
+            entry.OcrText ?? "",
+            entry.QrText ?? "",
+            entry.ContentTypeLabel ?? "",
             string.Join(" ", entry.FilePaths.Select(p => Path.GetFileName(p.TrimEnd(Path.DirectorySeparatorChar))))
         });
         return haystack.Contains(needle, StringComparison.CurrentCultureIgnoreCase);
@@ -261,6 +290,9 @@ public sealed class ClipboardStore
                     case ClipboardEntryKind.File when !entry.FilePaths.Any(p => File.Exists(p) || Directory.Exists(p)):
                         continue;
                 }
+                // 旧条目（升级前写入）没有 contentType，补一次检测；不立即落盘，等下次 Save 顺带写回
+                if (entry.Kind == ClipboardEntryKind.Text && entry.ContentType is null && entry.Text is not null)
+                    entry.ContentType = ContentDetector.Detect(entry.Text);
                 Entries.Add(entry);
             }
         }

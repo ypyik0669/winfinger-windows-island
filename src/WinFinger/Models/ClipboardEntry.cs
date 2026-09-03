@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using WinFinger.Services;
 
 namespace WinFinger.Models;
 
@@ -62,6 +63,10 @@ public sealed class ClipboardEntry : INotifyPropertyChanged
     private bool _isFavorite;
     private string? _text;
     private DateTime _createdAt = DateTime.Now;
+    private string? _ocrText;
+    private string? _ocrLang;
+    private string? _contentType;
+    private string? _qrText;
 
     [JsonPropertyName("id")] public Guid Id { get; set; } = Guid.NewGuid();
     [JsonPropertyName("kind")] public ClipboardEntryKind Kind { get; set; }
@@ -112,6 +117,64 @@ public sealed class ClipboardEntry : INotifyPropertyChanged
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsFavorite)));
         }
     }
+
+    /// <summary>OCR 识别出的文字（图片条目；无结果时为 null，不写入 JSON）。</summary>
+    [JsonPropertyName("ocrText")]
+    public string? OcrText
+    {
+        get => _ocrText;
+        set
+        {
+            if (_ocrText == value) return;
+            _ocrText = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(OcrText)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasOcrText)));
+        }
+    }
+
+    /// <summary>OCR 使用的识别语言标记。</summary>
+    [JsonPropertyName("ocrLang")]
+    public string? OcrLang
+    {
+        get => _ocrLang;
+        set
+        {
+            if (_ocrLang == value) return;
+            _ocrLang = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(OcrLang)));
+        }
+    }
+
+    /// <summary>内容类型（<see cref="ContentDetector"/> 的常量之一）。</summary>
+    [JsonPropertyName("contentType")]
+    public string? ContentType
+    {
+        get => _contentType;
+        set
+        {
+            if (_contentType == value) return;
+            _contentType = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ContentType)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ContentTypeLabel)));
+        }
+    }
+
+    /// <summary>图片中识别出的二维码内容。</summary>
+    [JsonPropertyName("qrText")]
+    public string? QrText
+    {
+        get => _qrText;
+        set
+        {
+            if (_qrText == value) return;
+            _qrText = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(QrText)));
+        }
+    }
+
+    [JsonIgnore] public bool HasOcrText => !string.IsNullOrWhiteSpace(OcrText);
+
+    [JsonIgnore] public string? ContentTypeLabel => ContentDetector.Label(ContentType);
 
     /// <summary>相对时间显示（如"3 分钟前"）需要定时刷新时调用：CreatedAt 值未变，但显示要重算。</summary>
     public void RaiseCreatedAtChanged() =>
