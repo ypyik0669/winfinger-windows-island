@@ -102,11 +102,15 @@ public partial class ExpandedPanelView : UserControl
 
     // ── header drag region (mac HeaderDragRegion): drag moves the panel, a tap collapses unless pinned ──
 
+    /// <summary>拖动取样只认系统光标：窗口一边跟手移动，窗口内坐标就不再可靠（见 IslandWindow.CursorScreen）。</summary>
+    private static Point CursorScreen() =>
+        WinFinger.Interop.NativeMethods.GetCursorPos(out var p) ? new Point(p.X, p.Y) : new Point(0, 0);
+
     private void OnDragDown(object sender, MouseButtonEventArgs e)
     {
         _dragArmed = true;
         _dragging = false;
-        _dragStart = DragRegion.PointToScreen(e.GetPosition(DragRegion));
+        _dragStart = CursorScreen();
         DragRegion.CaptureMouse();
         e.Handled = true;
     }
@@ -114,7 +118,7 @@ public partial class ExpandedPanelView : UserControl
     private void OnDragMove(object sender, MouseEventArgs e)
     {
         if (!_dragArmed || e.LeftButton != MouseButtonState.Pressed) return;
-        var now = DragRegion.PointToScreen(e.GetPosition(DragRegion));
+        var now = CursorScreen();
         var delta = new Point(now.X - _dragStart.X, now.Y - _dragStart.Y);
         if (!_dragging && Math.Sqrt(delta.X * delta.X + delta.Y * delta.Y) <= 3) return;
         _dragging = true;
@@ -129,7 +133,7 @@ public partial class ExpandedPanelView : UserControl
         if (_dragging)
         {
             _dragging = false;
-            var now = DragRegion.PointToScreen(e.GetPosition(DragRegion));
+            var now = CursorScreen();
             HeaderDragged?.Invoke(new Point(now.X - _dragStart.X, now.Y - _dragStart.Y), true);
             return;
         }

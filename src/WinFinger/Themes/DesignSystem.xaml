@@ -543,4 +543,74 @@
         </Setter>
     </Style>
 
+    <!-- Menus without an explicit style (tray menu): themed rows, check marks and dark submenu popups.
+         Without this WPF falls back to the system template, whose submenu popup is light while the
+         inherited foreground stays white — the flyout becomes unreadable. -->
+    <Style x:Key="{x:Static MenuItem.SeparatorStyleKey}" TargetType="Separator">
+        <Setter Property="Margin" Value="10,4"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Separator">
+                    <Border Height="1" Background="{DynamicResource Brush.Hairline}"/>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style TargetType="MenuItem">
+        <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}"/>
+        <Setter Property="FontFamily" Value="{StaticResource Font.Text}"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="MenuItem">
+                    <Grid>
+                        <Border x:Name="bg" Background="Transparent" CornerRadius="6" Padding="10,6" MinWidth="150">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="18"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="check" Grid.Column="0" Text="&#xE73E;" FontFamily="{StaticResource Font.Icon}"
+                                           FontSize="11" VerticalAlignment="Center" Visibility="Collapsed"
+                                           Foreground="{DynamicResource Brush.Accent}"/>
+                                <ContentPresenter x:Name="header" Grid.Column="1" ContentSource="Header"
+                                                  VerticalAlignment="Center" RecognizesAccessKey="True"/>
+                                <TextBlock x:Name="arrow" Grid.Column="2" Text="&#xE76C;" FontFamily="{StaticResource Font.Icon}"
+                                           FontSize="10" Margin="16,0,0,0" VerticalAlignment="Center" Visibility="Collapsed"
+                                           Foreground="{DynamicResource Brush.TextSecondary}"/>
+                            </Grid>
+                        </Border>
+                        <Popup x:Name="PART_Popup" Placement="Right" HorizontalOffset="4" VerticalOffset="-6"
+                               IsOpen="{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}"
+                               AllowsTransparency="True" Focusable="False" PopupAnimation="Fade" StaysOpen="False">
+                            <Border Background="{DynamicResource Brush.PopoverBackground}" BorderBrush="{DynamicResource Brush.Hairline}"
+                                    BorderThickness="1" CornerRadius="10" Padding="4" Margin="0,0,8,8"
+                                    TextElement.Foreground="{DynamicResource Brush.TextPrimary}">
+                                <Border.Effect>
+                                    <DropShadowEffect BlurRadius="12" ShadowDepth="2" Opacity="0.35"/>
+                                </Border.Effect>
+                                <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Cycle"/>
+                            </Border>
+                        </Popup>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsHighlighted" Value="True">
+                            <Setter TargetName="bg" Property="Background" Value="{DynamicResource Brush.FillStrong}"/>
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="check" Property="Visibility" Value="Visible"/>
+                        </Trigger>
+                        <Trigger Property="HasItems" Value="True">
+                            <Setter TargetName="arrow" Property="Visibility" Value="Visible"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.TextTertiary}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
 </ResourceDictionary>

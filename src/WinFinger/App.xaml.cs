@@ -210,6 +210,19 @@ public partial class App : Application
             ContextMenu = menu
         };
         _trayIcon.TrayLeftMouseUp += (_, _) => Model.ToggleExpanded();
+
+        // dev hook: WINFINGER_TRAYMENU=1 启动 1.5s 后在鼠标处弹出托盘菜单（托盘图标常在溢出区，自动化点不到）
+        if (Environment.GetEnvironmentVariable("WINFINGER_TRAYMENU") == "1")
+        {
+            var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1500) };
+            t.Tick += (_, _) =>
+            {
+                t.Stop();
+                menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Mouse;
+                menu.IsOpen = true;
+            };
+            t.Start();
+        }
     }
 
     private void PickBackgroundImage()

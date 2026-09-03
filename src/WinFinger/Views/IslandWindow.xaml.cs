@@ -543,9 +543,17 @@ public partial class IslandWindow : Window
     private void OnIslandMouseMove(object sender, MouseEventArgs e)
     {
         if (!_dragArmed || e.LeftButton != MouseButtonState.Pressed) return;
-        var screen = IslandBorder.PointToScreen(e.GetPosition(IslandBorder));
+        var screen = CursorScreen();
         ContinueDrag(new Point(screen.X - _dragStartScreen.X, screen.Y - _dragStartScreen.Y));
     }
+
+    /// <summary>
+    /// 拖动一律用系统光标位置取样。PointToScreen(e.GetPosition(…)) 把消息里的窗口内坐标
+    /// 加上窗口的当前位置，而拖动过程中窗口自己一直在动 —— 两者不同步就会自激振荡
+    /// （贴边、面板展开时最明显）。
+    /// </summary>
+    private static Point CursorScreen() =>
+        NativeMethods.GetCursorPos(out var p) ? new Point(p.X, p.Y) : new Point(0, 0);
 
     private void BeginDrag(System.Windows.Point screenPoint)
     {
@@ -770,7 +778,7 @@ public partial class IslandWindow : Window
     private void OnIslandMouseDown(object sender, MouseButtonEventArgs e)
     {
         if (_model.IsExpanded) return;
-        BeginDrag(IslandBorder.PointToScreen(e.GetPosition(IslandBorder)));
+        BeginDrag(CursorScreen());
         IslandBorder.CaptureMouse();
     }
 
