@@ -151,6 +151,7 @@ public sealed class ClipboardStore
     {
         entry.Text = newText;
         entry.ContentHash = Hash(Encoding.UTF8.GetBytes(newText));
+        entry.ContentType = ContentDetector.Detect(newText);
         Save();
         EntryChanged?.Invoke(entry);
     }

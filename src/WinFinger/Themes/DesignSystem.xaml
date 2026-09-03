@@ -507,5 +507,40 @@
             </Setter.Value>
         </Setter>
     </Style>
+    <!-- Flat menu item that owns a submenu (e.g. the AI group) -->
+    <Style x:Key="MenuItem.FlatSub" TargetType="MenuItem" BasedOn="{StaticResource MenuItem.Flat}">
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="MenuItem">
+                    <Grid>
+                        <Border x:Name="bg" Background="Transparent" CornerRadius="6" Padding="12,6" MinWidth="120">
+                            <DockPanel>
+                                <TextBlock DockPanel.Dock="Right" Text="&#xE76C;" FontFamily="{StaticResource Font.Icon}" FontSize="10"
+                                           Margin="16,0,0,0" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource Brush.TextSecondary}"/>
+                                <ContentPresenter ContentSource="Header" VerticalAlignment="Center"/>
+                            </DockPanel>
+                        </Border>
+                        <Popup x:Name="PART_Popup" Placement="Right" HorizontalOffset="4" VerticalOffset="-6"
+                               IsOpen="{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}"
+                               AllowsTransparency="True" Focusable="False" PopupAnimation="Fade" StaysOpen="False">
+                            <Border Background="{DynamicResource Brush.PopoverBackground}" BorderBrush="{DynamicResource Brush.Hairline}"
+                                    BorderThickness="1" CornerRadius="10" Padding="4" Margin="0,0,8,8">
+                                <Border.Effect>
+                                    <DropShadowEffect BlurRadius="12" ShadowDepth="2" Opacity="0.35"/>
+                                </Border.Effect>
+                                <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Cycle"/>
+                            </Border>
+                        </Popup>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsHighlighted" Value="True">
+                            <Setter TargetName="bg" Property="Background" Value="{DynamicResource Brush.FillStrong}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
 
 </ResourceDictionary>

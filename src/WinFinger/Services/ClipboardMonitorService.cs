@@ -211,10 +211,9 @@ public sealed partial class ClipboardMonitorService : ObservableObject
         }
         bool hashMatch = _ignoreHash == hash;
         bool kindMatch = _ignoreKind is not null && _ignoreKind == kind;
-        if (!hashMatch && !kindMatch) return false;
-        _ignoreHash = null;
-        _ignoreKind = null;
-        return true;
+        // 命中后不清空：一次写回会触发两次 WM_CLIPBOARDUPDATE（SetDataObject 的延迟渲染 + flush），
+        // 抑制窗口很短，让它自然过期即可。
+        return hashMatch || kindMatch;
     }
 
     /// <summary>与采集端一致的文本哈希口径（同样按 MaxTextLength 截断）。</summary>

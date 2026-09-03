@@ -1,7 +1,7 @@
 <UserControl x:Class="WinFinger.Controls.ResultDrawer"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             MaxHeight="260" Visibility="Collapsed">
+             MaxHeight="230" Visibility="Collapsed">
     <Border x:Name="Root" Background="{DynamicResource Brush.Card}" CornerRadius="14" Padding="12,10"
             BorderThickness="1" BorderBrush="{DynamicResource Brush.Hairline}">
         <Grid>
@@ -42,11 +42,11 @@
             <!-- body -->
             <Grid Grid.Row="2" Margin="0,8,0,0">
                 <TextBox x:Name="TextBody" Style="{StaticResource TextBox.Dark}" IsReadOnly="True" FontSize="12"
-                         TextWrapping="Wrap" AcceptsReturn="True" MaxHeight="150" MinHeight="44"
+                         TextWrapping="Wrap" AcceptsReturn="True" MaxHeight="120" MinHeight="44"
                          VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top" Visibility="Collapsed"/>
 
                 <StackPanel x:Name="ImageBody" Orientation="Vertical" Visibility="Collapsed">
-                    <Image x:Name="ResultImage" MaxHeight="150" Stretch="Uniform" HorizontalAlignment="Left"
+                    <Image x:Name="ResultImage" MaxHeight="130" Stretch="Uniform" HorizontalAlignment="Left"
                            RenderOptions.BitmapScalingMode="HighQuality"/>
                     <TextBlock x:Name="ImageSizeLabel" FontSize="10" Margin="0,4,0,0"
                                FontFamily="{StaticResource Font.Text}" Foreground="{DynamicResource Brush.TextTertiary}"/>

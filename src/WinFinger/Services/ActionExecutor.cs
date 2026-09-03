@@ -337,6 +337,7 @@ public sealed class ActionExecutor
         }
         try
         {
+            if (_model.IsExpanded) _model.Collapse();
             var win = new Views.PinnedImageWindow(path);
             win.Show();
             win.Activate();

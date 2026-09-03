@@ -186,7 +186,12 @@ public partial class ClipboardPage : UserControl, IIslandPage
     }
 
     /// <summary>只把键盘焦点送回搜索框：不动选中项、不动已有查询词。</summary>
-    private void FocusSearch() => Dispatcher.BeginInvoke(DispatcherPriority.Input, () => SearchBox.Focus());
+    private void FocusSearch() => Dispatcher.BeginInvoke(DispatcherPriority.Input, () =>
+    {
+        // 编辑弹层开着时（右键菜单 Closed 会紧随 OpenEdit 之后触发）别把焦点从编辑框抢走
+        if (EditPopup.IsOpen) return;
+        SearchBox.Focus();
+    });
 
     /// <summary>面板刚展开 / 切到本页：清选中、聚焦并全选搜索框（下一次输入直接覆盖旧查询）。</summary>
     private void ResetToSearch() => Dispatcher.BeginInvoke(DispatcherPriority.Input, () =>
@@ -422,7 +427,7 @@ public partial class ClipboardPage : UserControl, IIslandPage
                 ItemCollection target = menu.Items;
                 if (group.Key is { Length: > 0 } groupName)
                 {
-                    var sub = new MenuItem { Header = groupName, Style = (Style)FindResource("MenuItem.Flat") };
+                    var sub = new MenuItem { Header = groupName, Style = (Style)FindResource("MenuItem.FlatSub") };
                     menu.Items.Add(sub);
                     target = sub.Items;
                 }
@@ -552,9 +557,10 @@ public partial class ClipboardPage : UserControl, IIslandPage
         EditBox.Text = entry.Text ?? "";
         EditPopup.PlacementTarget = EntryList;
         EditPopup.IsOpen = true;
-        Dispatcher.BeginInvoke(DispatcherPriority.Input, () =>
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
         {
-            EditBox.Focus();
+            if (!EditPopup.IsOpen) return;
+            Keyboard.Focus(EditBox);
             EditBox.CaretIndex = EditBox.Text.Length;
         });
     }
