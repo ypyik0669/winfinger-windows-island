@@ -14,6 +14,12 @@ public sealed class HotkeyService : IDisposable
     /// <summary>剪贴板面板热键的固定 id。</summary>
     public const int HotkeyClipboard = 1;
 
+    /// <summary>区域截图热键的固定 id。</summary>
+    public const int HotkeyScreenshot = 2;
+
+    /// <summary>截图识字热键的固定 id。</summary>
+    public const int HotkeyScreenshotOcr = 3;
+
     private readonly Dictionary<int, Action> _handlers = new();
     private HwndSource? _source;
     private IntPtr _hwnd;

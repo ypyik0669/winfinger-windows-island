@@ -80,6 +80,7 @@ public partial class IslandWindow : Window
             _model.ClipboardMonitor.Attach(this);
             _model.Hotkeys.Attach(this);
             RegisterClipboardHotkey();
+            RegisterScreenshotHotkeys();
             _glass = new LiveGlassCapture();
             GlassBrush.ImageSource = _glass.Bitmap;
             _glassTimer = new System.Windows.Threading.DispatcherTimer
@@ -696,6 +697,21 @@ public partial class IslandWindow : Window
             else _model.Select(AppPage.Clipboard);
         });
         if (!ok) _model.Notifications.Post("⌨", $"快捷键 {gesture} 被占用");
+    }
+
+    /// <summary>注册截图热键（默认 Ctrl+Shift+A 区域截图 / Ctrl+Shift+T 截图识字）。</summary>
+    private void RegisterScreenshotHotkeys()
+    {
+        var settings = _model.SettingsStore.Settings;
+        Bind(Services.HotkeyService.HotkeyScreenshot, settings.HotkeyScreenshot, false);
+        Bind(Services.HotkeyService.HotkeyScreenshotOcr, settings.HotkeyScreenshotOcr, true);
+
+        void Bind(int id, string gesture, bool ocr)
+        {
+            if (string.IsNullOrWhiteSpace(gesture)) return;
+            bool ok = _model.Hotkeys.Rebind(id, gesture, () => _ = _model.Screenshot.CaptureToHistoryAsync(ocr));
+            if (!ok) _model.Notifications.Post("⌨", $"截图快捷键 {gesture} 被占用，请在功能设置中更换");
+        }
     }
 
     private void OnDisplaySettingsChanged(object? sender, EventArgs e) =>

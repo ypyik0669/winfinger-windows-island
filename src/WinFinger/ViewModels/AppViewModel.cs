@@ -73,6 +73,7 @@ public sealed partial class AppViewModel : ObservableObject
     public HotkeyService Hotkeys { get; } = new();
     public PasteService Paste { get; }
     public OcrService Ocr { get; } = new();
+    public ScreenshotService Screenshot { get; }
     public AiService Ai { get; }
     public ActionCatalogService Actions { get; }
 
@@ -99,6 +100,7 @@ public sealed partial class AppViewModel : ObservableObject
         Paste = new PasteService(ClipboardMonitor, ClipboardStore, FocusRestore, this, Notifications);
         Ai = new AiService(SettingsStore);
         Actions = new ActionCatalogService(Notifications);
+        Screenshot = new ScreenshotService(this);
         ActionCatalogService.Current = Actions;
 
         var settings = SettingsStore.Settings;
