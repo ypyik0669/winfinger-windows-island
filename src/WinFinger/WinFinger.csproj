@@ -26,6 +26,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="WinFinger.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <EmbeddedResource Include="Resources\shortcuts.json" />
     <EmbeddedResource Include="Resources\actions.json" />
   </ItemGroup>

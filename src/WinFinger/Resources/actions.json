@@ -1,1 +1,173 @@
-[]
+[
+  {
+    "id": "open-url",
+    "title": "打开链接",
+    "icon": "E71B",
+    "match": { "types": ["url"] },
+    "run": "open:{text}",
+    "inline": true,
+    "order": 10
+  },
+  {
+    "id": "ocr",
+    "title": "识别文字",
+    "icon": "E8D2",
+    "match": { "kinds": ["image"] },
+    "run": "builtin:ocr",
+    "inline": true,
+    "order": 15
+  },
+  {
+    "id": "send-mail",
+    "title": "发送邮件",
+    "icon": "E715",
+    "match": { "types": ["email"] },
+    "run": "open:mailto:{text}",
+    "inline": true,
+    "order": 20
+  },
+  {
+    "id": "qr-decode",
+    "title": "识别二维码",
+    "icon": "E8FE",
+    "match": { "kinds": ["image"] },
+    "run": "builtin:qr-decode",
+    "inline": true,
+    "order": 25
+  },
+  {
+    "id": "call-phone",
+    "title": "复制号码",
+    "icon": "E717",
+    "match": { "types": ["phone"] },
+    "run": "builtin:copy-digits",
+    "inline": true,
+    "order": 30
+  },
+  {
+    "id": "pin-image",
+    "title": "悬浮显示",
+    "icon": "E718",
+    "match": { "kinds": ["image"] },
+    "run": "builtin:pin",
+    "inline": false,
+    "order": 35
+  },
+  {
+    "id": "color-preview",
+    "title": "颜色预览",
+    "icon": "E790",
+    "match": { "types": ["color"] },
+    "run": "builtin:color",
+    "inline": true,
+    "order": 40
+  },
+  {
+    "id": "json-format",
+    "title": "格式化 JSON",
+    "icon": "E943",
+    "match": { "types": ["json"] },
+    "run": "builtin:json-format",
+    "inline": true,
+    "order": 50
+  },
+  {
+    "id": "json-minify",
+    "title": "压缩 JSON",
+    "icon": "E943",
+    "match": { "types": ["json"] },
+    "run": "builtin:json-minify",
+    "inline": false,
+    "order": 60
+  },
+  {
+    "id": "ts-convert",
+    "title": "时间戳转换",
+    "icon": "E823",
+    "match": { "types": ["timestamp"] },
+    "run": "builtin:timestamp",
+    "inline": true,
+    "order": 70
+  },
+  {
+    "id": "open-path",
+    "title": "打开路径",
+    "icon": "E8E5",
+    "match": { "types": ["path"], "kinds": ["file"] },
+    "run": "builtin:open-path",
+    "inline": true,
+    "order": 80
+  },
+  {
+    "id": "reveal-path",
+    "title": "在资源管理器中显示",
+    "icon": "E838",
+    "match": { "types": ["path"], "kinds": ["file"] },
+    "run": "shell:explorer.exe /select,\"{path}\"",
+    "inline": false,
+    "order": 85
+  },
+  {
+    "id": "word-count",
+    "title": "统计字数",
+    "icon": "E8A5",
+    "match": { "kinds": ["text", "ocr"] },
+    "run": "builtin:word-count",
+    "inline": false,
+    "order": 90
+  },
+  {
+    "id": "qr-encode",
+    "title": "生成二维码",
+    "icon": "E8FE",
+    "match": { "kinds": ["text"] },
+    "run": "builtin:qr-encode",
+    "inline": false,
+    "order": 100
+  },
+  {
+    "id": "ai-translate",
+    "title": "翻译",
+    "icon": "✨",
+    "match": { "kinds": ["text", "ocr"] },
+    "run": "builtin:ai-translate",
+    "inline": true,
+    "order": 110
+  },
+  {
+    "id": "ai-summarize",
+    "title": "总结",
+    "icon": "✨",
+    "match": { "kinds": ["text", "ocr"] },
+    "run": "prompt:用不超过 5 句话总结下面的内容：\n\n{text}",
+    "inline": false,
+    "order": 120
+  },
+  {
+    "id": "ai-polish",
+    "title": "润色",
+    "icon": "✨",
+    "match": { "kinds": ["text", "ocr"] },
+    "run": "prompt:润色下面的文字，保持原意，让它更通顺自然，只输出润色后的文字：\n\n{text}",
+    "inline": false,
+    "order": 130
+  },
+  {
+    "id": "ai-explain",
+    "title": "解释",
+    "icon": "✨",
+    "match": { "kinds": ["text", "ocr"] },
+    "run": "prompt:用通俗易懂的中文解释下面的内容：\n\n{text}",
+    "inline": false,
+    "order": 140
+  },
+  {
+    "id": "ai-keypoints",
+    "title": "提取要点",
+    "icon": "✨",
+    "match": { "kinds": ["text", "ocr"] },
+    "run": "prompt:提取下面内容的要点，用简短的列表输出：\n\n{text}",
+    "inline": false,
+    "order": 150
+  }
+]
