@@ -1,0 +1,14 @@
+<Window x:Class="WinFinger.Views.PinnedImageWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="悬浮图片"
+        WindowStyle="None" AllowsTransparency="True" ResizeMode="NoResize"
+        Background="Transparent" Topmost="True" ShowInTaskbar="False"
+        SizeToContent="WidthAndHeight" WindowStartupLocation="CenterScreen"
+        KeyDown="OnKeyDown"
+        MouseLeftButtonDown="OnDragStart"
+        MouseWheel="OnWheel">
+    <Border Background="#22000000" CornerRadius="8" Padding="2" ToolTip="拖动移动 · 滚轮缩放 · 双击或 Esc 关闭">
+        <Image x:Name="Pinned" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality"/>
+    </Border>
+</Window>
