@@ -37,6 +37,11 @@ public sealed class AppSettings
     public double ExpandedUserWidth { get; set; }
     /// <summary>Completed focus sessions, never reset.</summary>
     public int PomodoroCompletedFocusCount { get; set; }
+
+    // ── utools 剪贴板管理升级 ──
+    public string ClipboardHotkey { get; set; } = "Ctrl+Shift+V";
+    public bool PasteAfterSelect { get; set; } = true;
+    public int MaxTextLength { get; set; } = 524288;
 }
 
 /// <summary>settings.json persistence + the HKCU Run auto-start key.</summary>
@@ -52,13 +57,14 @@ public sealed class SettingsService
         Load();
     }
 
+    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+
     public void Save()
     {
         try
         {
             StoragePaths.EnsureCreated();
-            File.WriteAllText(StoragePaths.SettingsJson,
-                JsonSerializer.Serialize(Settings, new JsonSerializerOptions { WriteIndented = true }));
+            AtomicJson.Write(StoragePaths.SettingsJson, Settings, JsonOptions);
         }
         catch
         {
@@ -87,14 +93,28 @@ public sealed class SettingsService
 
     private void Load()
     {
+        if (!File.Exists(StoragePaths.SettingsJson)) return;
         try
         {
-            if (!File.Exists(StoragePaths.SettingsJson)) return;
-            Settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(StoragePaths.SettingsJson)) ?? new AppSettings();
+            Settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(StoragePaths.SettingsJson), JsonOptions) ?? new AppSettings();
         }
         catch
         {
+            // 文件存在但解析失败：先改名保留现场，避免后续 Save 把损坏内容悄悄覆盖
+            TryMarkCorrupt(StoragePaths.SettingsJson);
             Settings = new AppSettings();
+        }
+    }
+
+    private static void TryMarkCorrupt(string path)
+    {
+        try
+        {
+            File.Move(path, path + ".corrupt", overwrite: true);
+        }
+        catch
+        {
+            // best effort
         }
     }
 }

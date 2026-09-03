@@ -63,9 +63,9 @@ public sealed class NoteStore
 
     private void Load()
     {
+        if (!File.Exists(StoragePaths.NotesJson)) return;
         try
         {
-            if (!File.Exists(StoragePaths.NotesJson)) return;
             var decoded = JsonSerializer.Deserialize<List<Note>>(File.ReadAllText(StoragePaths.NotesJson), JsonOptions);
             if (decoded is null) return;
             foreach (var note in decoded.OrderByDescending(n => n.IsPinned).ThenByDescending(n => n.UpdatedAt))
@@ -73,7 +73,20 @@ public sealed class NoteStore
         }
         catch
         {
-            // corrupt file: start fresh
+            // 文件存在但解析失败：先改名保留现场，避免后续 Save 把损坏内容悄悄覆盖
+            TryMarkCorrupt(StoragePaths.NotesJson);
+        }
+    }
+
+    private static void TryMarkCorrupt(string path)
+    {
+        try
+        {
+            File.Move(path, path + ".corrupt", overwrite: true);
+        }
+        catch
+        {
+            // best effort
         }
     }
 
@@ -82,7 +95,7 @@ public sealed class NoteStore
         try
         {
             StoragePaths.EnsureCreated();
-            File.WriteAllText(StoragePaths.NotesJson, JsonSerializer.Serialize(Notes.ToList(), JsonOptions));
+            AtomicJson.Write(StoragePaths.NotesJson, Notes.ToList(), JsonOptions);
         }
         catch
         {
