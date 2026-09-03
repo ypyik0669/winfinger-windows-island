@@ -25,7 +25,8 @@ public sealed class ClipboardStore
     /// <summary>Raised after an entry is created or touched (moved to front on a duplicate hit) and persisted.</summary>
     public event Action<ClipboardEntry>? EntryChanged;
 
-    private static readonly JsonSerializerOptions JsonOptions = new()
+    /// <summary>clipboard.json 的序列化配置（公开以便单测断言 null 键省略 / filePaths 仍写出）。</summary>
+    public static JsonSerializerOptions JsonOptions { get; } = new()
     {
         WriteIndented = true,
         // 可选字段（ocrText/contentType 等）为 null 时不写入，保持与 mac clipboard.json 兼容

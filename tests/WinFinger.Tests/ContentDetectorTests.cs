@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Windows.Media;
 using WinFinger.Models;
 using WinFinger.Services;
@@ -26,6 +27,57 @@ public class ContentDetectorTests
     [InlineData("", ContentDetector.Plain)]
     public void Detect_ReturnsExpectedType(string input, string expected)
         => Assert.Equal(expected, ContentDetector.Detect(input));
+
+    // ── 误报回归：普通剪贴板文本不得被判成 code/date/phone ──
+
+    [Theory]
+    [InlineData("Please return the item; thanks.")]           // 散文里的分号 + return
+    [InlineData("Call me back; I will explain later.")]
+    [InlineData("公开的返回政策：请在 7 天内 return。")]
+    [InlineData("1-2")]                                       // 不是日期
+    [InlineData("3-4")]
+    [InlineData("10-20")]
+    [InlineData("1234567")]                                   // 裸数字串，不是电话
+    [InlineData("9876543210")]
+    public void Detect_OrdinaryText_IsPlain(string input)
+        => Assert.Equal(ContentDetector.Plain, ContentDetector.Detect(input));
+
+    [Fact]
+    public void Detect_CompactDate_IsNeitherPhoneNorDate()
+    {
+        var type = ContentDetector.Detect("20260903");
+        Assert.NotEqual(ContentDetector.Phone, type);
+        Assert.NotEqual(ContentDetector.DateText, type);
+        Assert.Equal(ContentDetector.Plain, type);
+    }
+
+    [Theory]
+    [InlineData("+86 138 0000 0000", ContentDetector.Phone)]
+    [InlineData("13800000000", ContentDetector.Phone)]
+    [InlineData("010-12345678", ContentDetector.Phone)]
+    // 400/800 服务号通常写成带分隔符的形式；紧凑的 "4001234567" 与 10 位 Unix 时间戳无法区分，按时间戳处理
+    [InlineData("400-123-4567", ContentDetector.Phone)]
+    [InlineData("800-810-1234", ContentDetector.Phone)]
+    [InlineData("2026-09-03", ContentDetector.DateText)]
+    [InlineData("2026/09/03 12:00", ContentDetector.DateText)]
+    [InlineData("2026年9月3日", ContentDetector.DateText)]
+    [InlineData("function f(){return 1;}", ContentDetector.Code)]
+    public void Detect_StillRecognisesRealSamples(string input, string expected)
+        => Assert.Equal(expected, ContentDetector.Detect(input));
+
+    [Fact]
+    public void Detect_MultiLineCSharpSnippet_IsCode()
+    {
+        const string snippet = "public void Foo()\n{\n    return;\n}";
+        Assert.Equal(ContentDetector.Code, ContentDetector.Detect(snippet));
+    }
+
+    [Fact]
+    public void Detect_PythonSnippet_IsCode()
+    {
+        const string snippet = "import os\n\ndef main(path):\n    return os.path.exists(path)";
+        Assert.Equal(ContentDetector.Code, ContentDetector.Detect(snippet));
+    }
 
     [Fact]
     public void Detect_VeryLongText_IsPlain()
@@ -168,4 +220,29 @@ public class ContentDetectorTests
     [Fact]
     public void Matches_EmptyQuery_MatchesEverything()
         => Assert.True(ClipboardStore.Matches(TextEntry("anything"), ClipboardFilter.All, "   "));
+
+    // ── JSON 往返：WhenWritingNull 只省略 null，不影响 filePaths ──
+
+    [Fact]
+    public void Json_TextEntry_KeepsEmptyFilePathsAndOmitsNullKeys()
+    {
+        var entry = TextEntry("hello");
+        var json = JsonSerializer.Serialize(entry, ClipboardStore.JsonOptions);
+
+        Assert.Contains("\"filePaths\": []", json);
+        Assert.DoesNotContain("\"imagePath\"", json);
+        Assert.DoesNotContain("\"ocrText\"", json);
+        Assert.DoesNotContain("\"qrText\"", json);
+        Assert.Contains("\"contentType\"", json);
+
+        var back = JsonSerializer.Deserialize<ClipboardEntry>(json, ClipboardStore.JsonOptions);
+        Assert.NotNull(back);
+        Assert.Equal("hello", back!.Text);
+        Assert.Equal(entry.Id, back.Id);
+        Assert.Equal(ClipboardEntryKind.Text, back.Kind);
+        Assert.Empty(back.FilePaths);
+        Assert.Null(back.ImagePath);
+        Assert.Null(back.OcrText);
+        Assert.Equal(entry.ContentType, back.ContentType);
+    }
 }

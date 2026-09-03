@@ -45,6 +45,30 @@ public static class ContentDetector
     private static readonly Regex CjkRegex = new("[一-鿿㐀-䶿぀-ヿ가-힯]", Opts, RegexTimeout);
     private static readonly Regex MarkdownInlineLinkRegex = new(@"\]\(", Opts, RegexTimeout);
 
+    // ── 电话：只认典型号码形态，避免把 "1234567"、"20260903" 这类裸数字串误判 ──
+    /// <summary>中国大陆手机号。</summary>
+    private static readonly Regex CnMobileRegex = new(@"^1[3-9]\d{9}$", Opts, RegexTimeout);
+    /// <summary>400/800 服务号。</summary>
+    private static readonly Regex ServiceNumberRegex = new(@"^[48]00\d{7}$", Opts, RegexTimeout);
+    /// <summary>0 开头的区号 + 号码。</summary>
+    private static readonly Regex TrunkNumberRegex = new(@"^0\d{9,11}$", Opts, RegexTimeout);
+    /// <summary>用分隔符隔开的两段数字（至少各 2 位），如 "010-12345678"。</summary>
+    private static readonly Regex SeparatedDigitGroupsRegex = new(@"\d{2,}[\s\-()]+\d{2,}", Opts, RegexTimeout);
+    /// <summary>紧凑日期 yyyyMMdd，用于把它排除在电话之外。</summary>
+    private static readonly Regex CompactDateRegex = new(@"^(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])$", Opts, RegexTimeout);
+
+    // ── 日期：必须是完整日期形态，"1-2"、"10-20" 这类不算 ──
+    private static readonly Regex IsoDateRegex = new(
+        @"^\d{4}[-/]\d{1,2}[-/]\d{1,2}(?:[ T]\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?\s*(?:Z|[+-]\d{2}:?\d{2})?)?$", Opts, RegexTimeout);
+    private static readonly Regex DayMonthYearDateRegex = new(
+        @"^\d{1,2}[-/]\d{1,2}[-/]\d{4}(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?$", Opts, RegexTimeout);
+    private static readonly Regex CjkDateRegex = new(@"^(\d{4})年(\d{1,2})月(\d{1,2})日", Opts, RegexTimeout);
+
+    // ── 代码：结构性特征（非普通散文会出现的写法） ──
+    private static readonly Regex ImportFromRegex = new(@"\bimport\s+.+\s+from\b|(?m)^\s*(?:import|from)\s+\w", Opts, RegexTimeout);
+    private static readonly Regex DefRegex = new(@"\bdef\s+\w+\s*\(", Opts, RegexTimeout);
+    private static readonly Regex FunctionDeclRegex = new(@"\bfunction\s*\w*\s*\(", Opts, RegexTimeout);
+
     /// <summary>识别文本内容类型；任何异常（含正则超时）都退回 plain，绝不抛出。</summary>
     public static string Detect(string text)
     {
@@ -71,9 +95,10 @@ public static class ContentDetector
             if (EmailRegex.IsMatch(trimmed)) return Email;
             // 时间戳先于电话：10/13 位纯数字同时符合电话形状，需优先归为时间戳。
             if (TryParseTimestamp(trimmed, out _, out _)) return Timestamp;
-            if (IsPhone(trimmed)) return Phone;
             if (TryParseColor(trimmed, out _)) return Color;
+            // 日期先于电话："2026-09-03" 也符合"数字-数字"的电话分组形态
             if (IsDateText(trimmed)) return DateText;
+            if (IsPhone(trimmed)) return Phone;
             if (IsPath(trimmed)) return Path;
         }
 
@@ -96,13 +121,32 @@ public static class ContentDetector
     {
         if (!PhoneShapeRegex.IsMatch(s)) return false;
         int digits = s.Count(char.IsAsciiDigit);
-        return digits is >= 7 and <= 15;
+        if (digits is < 7 or > 15) return false;
+
+        // 带国际区号前缀，直接认可
+        if (s.StartsWith('+')) return true;
+
+        // 带分隔符：要求确实是"数字段 + 分隔符 + 数字段"，而非零散的连字符
+        bool hasSeparator = s.Any(c => c is ' ' or '-' or '(' or ')');
+        if (hasSeparator) return SeparatedDigitGroupsRegex.IsMatch(s);
+
+        // 纯数字串：排除 yyyyMMdd，且只接受手机号 / 400-800 服务号 / 0 开头的固话
+        if (CompactDateRegex.IsMatch(s)) return false;
+        return CnMobileRegex.IsMatch(s) || ServiceNumberRegex.IsMatch(s) || TrunkNumberRegex.IsMatch(s);
     }
 
     private static bool IsDateText(string s)
     {
-        if (s.Length > 40) return false;
-        if (s.IndexOf('-') < 0 && s.IndexOf('/') < 0 && s.IndexOf(':') < 0) return false;
+        if (s.Length is < 8 or > 40) return false;
+
+        var cjk = CjkDateRegex.Match(s);
+        if (cjk.Success)
+        {
+            var normalized = $"{cjk.Groups[1].Value}-{cjk.Groups[2].Value}-{cjk.Groups[3].Value}";
+            return DateTime.TryParse(normalized, CultureInfo.InvariantCulture, DateTimeStyles.None, out _);
+        }
+
+        if (!IsoDateRegex.IsMatch(s) && !DayMonthYearDateRegex.IsMatch(s)) return false;
         return DateTime.TryParse(s, CultureInfo.CurrentCulture, DateTimeStyles.None, out _)
             || DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.None, out _);
     }
@@ -151,20 +195,36 @@ public static class ContentDetector
         return false;
     }
 
+    /// <summary>
+    /// 代码判定：单独的关键词不作数（"Please return the item; thanks." 是散文不是代码）。
+    /// 必须有 ≥2 个结构性特征，或者 1 个结构性特征 + 1 个语言关键词。
+    /// </summary>
     private static bool IsCode(string s)
     {
-        int hits = 0;
-        if (s.Contains(';')) hits++;
-        int braces = s.Count(c => c is '{' or '}');
-        if (braces >= 2) hits++;
-        if (s.Contains("=>")) hits++;
-        if (s.Contains("def ")) hits++;
-        if (s.Contains("function")) hits++;
-        if (s.Contains("import ")) hits++;
-        if (s.Contains("#include")) hits++;
-        if (s.Contains("public ")) hits++;
-        if (s.Contains("return ")) hits++;
-        return hits >= 2;
+        var lines = s.Split('\n');
+
+        int structural = 0;
+        if (s.Contains('{') && s.Contains('}')) structural++;
+        if (s.Contains("=>")) structural++;
+        if (s.Contains("#include")) structural++;
+        if (ImportFromRegex.IsMatch(s)) structural++;
+        if (DefRegex.IsMatch(s)) structural++;
+        if (FunctionDeclRegex.IsMatch(s)) structural++;
+        if (lines.Count(l => l.TrimEnd().EndsWith(';')) >= 2) structural++;
+        if (lines.Count(l => l.Length > 0 && (l[0] == '\t' || l.StartsWith("  ")) && l.Trim().Length > 0) >= 2) structural++;
+
+        if (structural >= 2) return true;
+        if (structural == 0) return false;
+
+        int keywords = 0;
+        if (s.Contains("public ")) keywords++;
+        if (s.Contains("private ")) keywords++;
+        if (s.Contains("static ")) keywords++;
+        if (s.Contains("class ")) keywords++;
+        if (s.Contains("const ")) keywords++;
+        if (s.Contains("return")) keywords++;
+        if (s.Contains("void ")) keywords++;
+        return keywords >= 1;
     }
 
     /// <summary>类型的中文短标签；plain / 未知 / null 返回 null（卡片上不显示 pill）。</summary>
