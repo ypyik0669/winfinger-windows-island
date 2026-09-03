@@ -22,6 +22,9 @@ public partial class ClipboardPage : UserControl, IIslandPage
     private ICollectionView? _view;
     private readonly DispatcherTimer _hoverTimer;
     private readonly DispatcherTimer _relativeTimer;
+    /// <summary>条目内容变化（后台 OCR 等）后的去抖刷新，避免每条都重建列表。</summary>
+    private readonly DispatcherTimer _entryChangedTimer;
+    private bool _actionsWired;
     private FrameworkElement? _hoverTarget;
     private ClipboardEntry? _editingEntry;
     /// <summary>本次左键按下的条目：抬起时不是同一条（拖拽滑出）就不当作点击。</summary>
@@ -36,6 +39,12 @@ public partial class ClipboardPage : UserControl, IIslandPage
             _hoverTimer.Stop();
             ShowPreview();
         };
+        _entryChangedTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(300) };
+        _entryChangedTimer.Tick += (_, _) =>
+        {
+            _entryChangedTimer.Stop();
+            RefreshKeepingSelection();
+        };
         // 相对时间（"3分钟"）每分钟重算一次，仅在页面可见时跑
         _relativeTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(60) };
         _relativeTimer.Tick += (_, _) => RefreshRelativeTimes();
@@ -48,6 +57,7 @@ public partial class ClipboardPage : UserControl, IIslandPage
             else
             {
                 _relativeTimer.Stop();
+                _entryChangedTimer.Stop();
                 Drawer.Close(); // 页面藏起来时结束流式输出
             }
         };
@@ -118,15 +128,19 @@ public partial class ClipboardPage : UserControl, IIslandPage
         WireFilter(FilterFile, ClipboardFilter.File);
         WireFilter(FilterFavorite, ClipboardFilter.Favorite);
 
-        // 动作框架：抽屉 → 执行器 → 右键菜单扩展点
+        // 动作框架：抽屉 → 执行器 → 右键菜单扩展点（Initialize 可能被调用多次，事件只挂一遍）
         Services.ActionCatalogService.Current = model.Actions;
         Drawer.Attach(model);
         model.AttachPresenter(Drawer);
-        if (!model.EntryActionProviders.OfType<Services.CatalogActionProvider>().Any())
-            model.EntryActionProviders.Add(new Services.CatalogActionProvider(model.Actions, () => model.Executor));
-        model.Actions.Changed += () => Dispatcher.BeginInvoke(new Action(RefreshFilter));
-        // OCR / 内容类型变了，卡片上的标签与内联动作要跟着换
-        model.ClipboardStore.EntryChanged += _ => Dispatcher.BeginInvoke(new Action(() => _view?.Refresh()));
+        if (!_actionsWired)
+        {
+            _actionsWired = true;
+            if (!model.EntryActionProviders.OfType<Services.CatalogActionProvider>().Any())
+                model.EntryActionProviders.Add(new Services.CatalogActionProvider(model.Actions, () => model.Executor));
+            model.Actions.Changed += () => Dispatcher.BeginInvoke(new Action(RefreshFilter));
+            // OCR / 内容类型变了，内联动作要跟着换：去抖后再刷，别打断后台识别时的滚动与选中
+            model.ClipboardStore.EntryChanged += _ => _entryChangedTimer.Start();
+        }
 
         model.ClipboardStore.Entries.CollectionChanged += OnEntriesChanged;
         model.ClipboardStore.FavoriteChanged += _ => RefreshFilter();
@@ -199,6 +213,21 @@ public partial class ClipboardPage : UserControl, IIslandPage
         // 过滤后选中项可能已经不在视图里，清掉避免"看不见的选中"
         if (EntryList.SelectedItem is ClipboardEntry selected && !VisibleEntries().Contains(selected))
             EntryList.SelectedIndex = -1;
+        RefreshEmptyState();
+    }
+
+    /// <summary>刷新视图但保住当前选中项（后台 OCR 改动条目时不该把用户的选中/滚动位置甩掉）。</summary>
+    private void RefreshKeepingSelection()
+    {
+        if (_view is null) return;
+        var selected = EntryList.SelectedItem as ClipboardEntry;
+        _view.Refresh();
+        if (selected is null) return;
+        if (VisibleEntries().Contains(selected))
+        {
+            EntryList.SelectedItem = selected;
+            EntryList.ScrollIntoView(selected);
+        }
         RefreshEmptyState();
     }
 
@@ -407,7 +436,7 @@ public partial class ClipboardPage : UserControl, IIslandPage
                     }, captured.IsDanger);
                 }
             }
-            Add(menu.Items, "自定义动作…（打开 actions.json）", "", RevealActionsFile);
+            Add(menu.Items, "自定义动作…（打开 actions.json）", "\uE713", RevealActionsFile);
         }
 
         menu.Items.Add(new Separator());

@@ -213,7 +213,7 @@ public static class ActionGlyph
 
     public static string Text(string? icon)
     {
-        if (string.IsNullOrEmpty(icon)) return ""; // More
+        if (string.IsNullOrEmpty(icon)) return "\uE712"; // More
         if (!IsGlyph(icon)) return icon!;
         return char.ConvertFromUtf32(int.Parse(icon!, NumberStyles.HexNumber, CultureInfo.InvariantCulture));
     }

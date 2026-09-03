@@ -3,6 +3,7 @@ using System.IO;
 using System.Text;
 using System.Text.Json;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using WinFinger.Models;
 using WinFinger.ViewModels;
 
@@ -41,7 +42,7 @@ public sealed class ActionExecutor
                     RunOpen(def, Expand(payload, entry));
                     break;
                 case ActionRunKind.Shell:
-                    RunShell(def, Expand(payload, entry, forShell: true));
+                    RunShell(def, entry, payload);
                     break;
                 case ActionRunKind.Prompt:
                     await RunPromptAsync(def.Title, Expand(payload, entry), entry);
@@ -59,7 +60,11 @@ public sealed class ActionExecutor
 
     // ── placeholders ──
 
-    /// <summary>展开 {text} {path} {png} {paths} {app}；<paramref name="forShell"/> 时转义引号并截断。</summary>
+    /// <summary>
+    /// 展开 {text} {path} {png} {paths} {app}。
+    /// <paramref name="forShell"/> 只做长度截断——shell 动作不经过任何 shell，展开后的值整段作为一个参数传给
+    /// <see cref="ProcessStartInfo.ArgumentList"/>，所以不需要（也不能）做引号转义。
+    /// </summary>
     internal static string Expand(string template, ClipboardEntry entry, bool forShell = false)
     {
         string text = entry.Text ?? entry.OcrText ?? "";
@@ -67,17 +72,71 @@ public sealed class ActionExecutor
         string paths = entry.FilePaths.Count > 0
             ? string.Join(" ", entry.FilePaths.Select(p => $"\"{p}\""))
             : (path.Length > 0 ? $"\"{path}\"" : "");
-        if (forShell)
-        {
-            if (text.Length > ShellTextLimit) text = text[..ShellTextLimit];
-            text = text.Replace("\"", "\\\"").ReplaceLineEndings(" ");
-        }
+        if (forShell && text.Length > ShellTextLimit) text = text[..ShellTextLimit];
         return template
             .Replace("{text}", text)
             .Replace("{png}", path)
             .Replace("{paths}", paths)
             .Replace("{path}", path)
             .Replace("{app}", entry.SourceAppName ?? "");
+    }
+
+    /// <summary>
+    /// 把 shell 动作的模板切成"程序 + 参数表"：按空白切分，双引号内的空白不切。
+    /// 占位符在切分之后才展开，所以剪贴板里的空格、引号、<c>&amp;</c>、<c>%VAR%</c>、换行都只会留在同一个参数里。
+    /// </summary>
+    internal static List<string> Tokenize(string template)
+    {
+        var tokens = new List<string>();
+        var current = new StringBuilder();
+        bool quoted = false, started = false;
+        foreach (char c in template)
+        {
+            if (c == '"')
+            {
+                quoted = !quoted;
+                started = true;
+                continue;
+            }
+            if (!quoted && char.IsWhiteSpace(c))
+            {
+                if (started) tokens.Add(current.ToString());
+                current.Clear();
+                started = false;
+                continue;
+            }
+            current.Append(c);
+            started = true;
+        }
+        if (started) tokens.Add(current.ToString());
+        return tokens;
+    }
+
+    /// <summary>切分并展开一条 shell 动作；模板为空时返回 false。</summary>
+    internal static bool BuildShellCommand(string template, ClipboardEntry entry,
+        out string fileName, out List<string> arguments)
+    {
+        fileName = "";
+        arguments = new List<string>();
+        var tokens = Tokenize(template);
+        if (tokens.Count == 0) return false;
+
+        fileName = Expand(tokens[0], entry, forShell: true);
+        if (fileName.Length == 0) return false;
+        foreach (string token in tokens.Skip(1))
+        {
+            // 单独的 {paths} 展开成多个参数，其余整段作为一个参数
+            if (token == "{paths}")
+            {
+                var list = entry.FilePaths.Count > 0
+                    ? entry.FilePaths.AsEnumerable()
+                    : new[] { entry.ImagePath ?? entry.FirstFilePath ?? "" }.Where(p => p.Length > 0);
+                arguments.AddRange(list);
+                continue;
+            }
+            arguments.Add(Expand(token, entry, forShell: true));
+        }
+        return true;
     }
 
     // ── run kinds ──
@@ -90,6 +149,8 @@ public sealed class ActionExecutor
             _presenter.ShowMessage(def.Title, "没有可打开的内容。");
             return;
         }
+        // "www.example.com" 没有协议头，ShellExecute 会当成文件名找不到
+        if (target.StartsWith("www.", StringComparison.OrdinalIgnoreCase)) target = "http://" + target;
         try
         {
             Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
@@ -100,20 +161,27 @@ public sealed class ActionExecutor
         }
     }
 
-    private void RunShell(ActionDefinition def, string command)
+    /// <summary>
+    /// 执行 shell 动作。<b>不经过 cmd.exe</b>：模板切成程序 + 参数表后直接 CreateProcess，
+    /// 剪贴板内容永远只是一个参数，不会被 <c>&amp;</c> / <c>|</c> 断开，<c>%VAR%</c> 也不会展开。
+    /// 确实需要 cmd 特性的用户可以自己写 <c>shell:cmd /c …</c>（风险自负）。
+    /// </summary>
+    private void RunShell(ActionDefinition def, ClipboardEntry entry, string template)
     {
-        if (command.Trim().Length == 0)
+        if (!BuildShellCommand(template, entry, out string fileName, out var arguments))
         {
             _presenter.ShowMessage(def.Title, "命令为空。");
             return;
         }
         try
         {
-            Process.Start(new ProcessStartInfo("cmd.exe", $"/c {command}")
+            var info = new ProcessStartInfo(fileName)
             {
                 UseShellExecute = false,
                 CreateNoWindow = true
-            });
+            };
+            foreach (string argument in arguments) info.ArgumentList.Add(argument);
+            Process.Start(info);
         }
         catch (Exception ex)
         {
@@ -357,11 +425,15 @@ public sealed class ActionExecutor
         }
         try
         {
-            byte[] png = await Task.Run(() => QrService.EncodePng(text));
-            var image = await Task.Run(() =>
+            // 只编码一次，PNG 字节直接从这张位图导出
+            var (image, png) = await Task.Run(() =>
             {
                 var bmp = QrService.Encode(text, 320);
-                return bmp;
+                var encoder = new PngBitmapEncoder();
+                encoder.Frames.Add(BitmapFrame.Create(bmp));
+                using var buffer = new MemoryStream();
+                encoder.Save(buffer);
+                return (bmp, buffer.ToArray());
             });
             _presenter.ShowImage(def.Title, image, ResultActions.Copy | ResultActions.SaveFile, png);
         }

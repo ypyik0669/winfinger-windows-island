@@ -95,7 +95,7 @@
     "icon": "E8E5",
     "match": { "types": ["path"], "kinds": ["file"] },
     "run": "builtin:open-path",
-    "inline": true,
+    "inline": false,
     "order": 80
   },
   {
@@ -103,8 +103,8 @@
     "title": "在资源管理器中显示",
     "icon": "E838",
     "match": { "types": ["path"], "kinds": ["file"] },
-    "run": "shell:explorer.exe /select,\"{path}\"",
-    "inline": false,
+    "run": "shell:explorer /select,{path}",
+    "inline": true,
     "order": 85
   },
   {

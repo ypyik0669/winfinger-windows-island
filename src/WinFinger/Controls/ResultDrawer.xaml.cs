@@ -98,6 +98,7 @@ public partial class ResultDrawer : UserControl, IResultPresenter
             StopButton.Visibility = Visibility.Collapsed;
             if (!string.IsNullOrEmpty(error))
             {
+                // 失败时不重建底部按钮：半截结果不该被当成可直接粘贴/替换的成品
                 HeaderStatus.Text = error;
                 if (_full.Length == 0)
                 {
@@ -106,11 +107,9 @@ public partial class ResultDrawer : UserControl, IResultPresenter
                     MessageBody.Visibility = Visibility.Visible;
                     Footer.Children.Clear();
                 }
+                return;
             }
-            else
-            {
-                HeaderStatus.Text = $"{_full.Length} 字符";
-            }
+            HeaderStatus.Text = $"{_full.Length} 字符";
             BuildFooter();
         });
     }
@@ -328,7 +327,7 @@ public partial class ResultDrawer : UserControl, IResultPresenter
         var copy = new Button
         {
             Style = (Style)FindResource("Button.Icon"),
-            Content = "",
+            Content = "\uE8C8",
             Width = 24,
             Height = 24,
             ToolTip = $"复制 {label}"

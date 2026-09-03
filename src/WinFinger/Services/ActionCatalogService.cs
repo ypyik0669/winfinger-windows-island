@@ -27,7 +27,10 @@ public sealed class ActionCatalogService
     private readonly DispatcherTimer _debounce;
     private FileSystemWatcher? _watcher;
     private List<ActionDefinition> _embedded = new();
-    private volatile bool _writingDefaults;
+
+    /// <summary>文件被占用时的重试次数（去抖计时器重挂）。</summary>
+    private const int MaxIoRetries = 5;
+    private int _ioRetries;
 
     public ActionCatalogService(NotificationService? notifications = null)
     {
@@ -90,7 +93,20 @@ public sealed class ActionCatalogService
         }
         catch (IOException)
         {
-            return; // 正在被写，等下一次去抖
+            // 文件正被别的进程写：重挂去抖再试，别把这次改动丢了
+            if (_ioRetries < MaxIoRetries)
+            {
+                _ioRetries++;
+                _debounce.Stop();
+                _debounce.Start();
+            }
+            else
+            {
+                LastError = "actions.json 读取失败（文件被占用）";
+                _notifications?.Post("⚙️", LastError);
+                _ioRetries = 0;
+            }
+            return;
         }
         catch (Exception)
         {
@@ -99,6 +115,7 @@ public sealed class ActionCatalogService
             return;
         }
 
+        _ioRetries = 0;
         _regexCache.Clear();
         All = Merge(_embedded, user);
         Changed?.Invoke();
@@ -209,7 +226,10 @@ public sealed class ActionCatalogService
         }
     });
 
-    /// <summary>拆 <c>run</c> 字段：前缀 → 类型，其余 → 载荷；无前缀按 builtin 处理。</summary>
+    /// <summary>
+    /// 拆 <c>run</c> 字段：前缀 → 类型，冒号之后 → 载荷。
+    /// 只认 <c>open:</c> / <c>shell:</c> / <c>builtin:</c> / <c>prompt:</c>；缺前缀、前缀不认识或载荷为空都返回 false。
+    /// </summary>
     public static bool ParseRun(string run, out ActionRunKind kind, out string payload)
     {
         kind = ActionRunKind.Builtin;
@@ -237,16 +257,11 @@ public sealed class ActionCatalogService
         {
             if (File.Exists(ActionsPath)) return;
             Directory.CreateDirectory(StoragePaths.Root);
-            _writingDefaults = true;
             File.WriteAllText(ActionsPath, ReadEmbeddedText() ?? "[]");
         }
         catch
         {
             // 写不进去也不影响内置动作
-        }
-        finally
-        {
-            _writingDefaults = false;
         }
     }
 
@@ -272,7 +287,7 @@ public sealed class ActionCatalogService
 
     private void OnFileTouched(object sender, FileSystemEventArgs e)
     {
-        if (_writingDefaults) return; // 自己写的默认副本不触发重载
+        // 默认副本是在 StartWatcher() 之前写的，自家的写落不到这里
         var dispatcher = Application.Current?.Dispatcher;
         if (dispatcher is null) return;
         dispatcher.BeginInvoke(() =>

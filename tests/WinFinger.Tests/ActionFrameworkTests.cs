@@ -180,12 +180,59 @@ public class ActionFrameworkTests
         Assert.Equal("\"C:\\a b.txt\" \"C:\\c.txt\"", ActionExecutor.Expand("{paths}", entry));
     }
 
+    // ── shell: 切分（不经过 cmd.exe，每个占位符整段作为一个参数） ──
+
     [Fact]
-    public void Expand_ForShell_EscapesQuotesAndFlattensLines()
+    public void Tokenize_SplitsOnWhitespaceRespectingQuotes() =>
+        Assert.Equal(new[] { "explorer", "/select,{path}" }, ActionExecutor.Tokenize("  explorer   \"/select,{path}\"  "));
+
+    [Fact]
+    public void BuildShellCommand_KeepsInjectionAttemptAsOneLiteralArgument()
     {
-        var entry = new ClipboardEntry { Kind = ClipboardEntryKind.Text, Text = "say \"hi\"\nagain" };
-        Assert.Equal("echo say \\\"hi\\\" again", ActionExecutor.Expand("echo {text}", entry, forShell: true));
+        var entry = new ClipboardEntry { Kind = ClipboardEntryKind.Text, Text = "\" & calc & \"" };
+        Assert.True(ActionExecutor.BuildShellCommand("notepad {text}", entry, out string file, out var args));
+        Assert.Equal("notepad", file);
+        string only = Assert.Single(args);
+        Assert.Equal("\" & calc & \"", only);
     }
+
+    [Fact]
+    public void BuildShellCommand_DoesNotExpandEnvironmentVariables()
+    {
+        var entry = new ClipboardEntry { Kind = ClipboardEntryKind.Text, Text = "%PATH%" };
+        Assert.True(ActionExecutor.BuildShellCommand("notepad {text}", entry, out _, out var args));
+        Assert.Equal("%PATH%", Assert.Single(args));
+    }
+
+    [Fact]
+    public void BuildShellCommand_KeepsSpacesAndNewlinesInOneArgument()
+    {
+        var entry = new ClipboardEntry { Kind = ClipboardEntryKind.Text, Text = "two words\nand a line" };
+        Assert.True(ActionExecutor.BuildShellCommand("notepad {text}", entry, out _, out var args));
+        Assert.Equal("two words\nand a line", Assert.Single(args));
+    }
+
+    [Fact]
+    public void BuildShellCommand_RevealPathBuiltIn()
+    {
+        var entry = new ClipboardEntry { Kind = ClipboardEntryKind.Image, ImagePath = @"C:\my pics\a.png" };
+        Assert.True(ActionExecutor.BuildShellCommand("explorer /select,{path}", entry, out string file, out var args));
+        Assert.Equal("explorer", file);
+        Assert.Equal(@"/select,C:\my pics\a.png", Assert.Single(args));
+    }
+
+    [Fact]
+    public void BuildShellCommand_PathsBecomeSeparateArguments()
+    {
+        var entry = new ClipboardEntry { Kind = ClipboardEntryKind.File };
+        entry.FilePaths.AddRange(new[] { @"C:\a b.txt", @"C:\c.txt" });
+        Assert.True(ActionExecutor.BuildShellCommand("notepad {paths}", entry, out _, out var args));
+        Assert.Equal(new[] { @"C:\a b.txt", @"C:\c.txt" }, args);
+    }
+
+    [Fact]
+    public void BuildShellCommand_RejectsEmptyTemplate() =>
+        Assert.False(ActionExecutor.BuildShellCommand("   ", new ClipboardEntry(), out _, out _));
 
     [Fact]
     public void Expand_ForShell_TruncatesLongText()
