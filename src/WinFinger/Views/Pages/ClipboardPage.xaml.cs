@@ -24,6 +24,8 @@ public partial class ClipboardPage : UserControl, IIslandPage
     private readonly DispatcherTimer _relativeTimer;
     private FrameworkElement? _hoverTarget;
     private ClipboardEntry? _editingEntry;
+    /// <summary>本次左键按下的条目：抬起时不是同一条（拖拽滑出）就不当作点击。</summary>
+    private ClipboardEntry? _pressedEntry;
 
     public ClipboardPage()
     {
@@ -89,6 +91,8 @@ public partial class ClipboardPage : UserControl, IIslandPage
         };
         SearchBox.PreviewKeyDown += (_, e) => HandleListKey(e);
         EntryList.PreviewKeyDown += (_, e) => HandleListKey(e);
+        // 鼠标滑出列表就作废这次按下，别在别处抬起时误粘贴
+        EntryList.MouseLeave += (_, _) => _pressedEntry = null;
 
         EditSaveButton.Click += (_, _) => CommitEdit();
         EditCancelButton.Click += (_, _) => CloseEdit();
@@ -116,12 +120,12 @@ public partial class ClipboardPage : UserControl, IIslandPage
     public void OnShown()
     {
         RefreshFilter();
-        _relativeTimer.Start();
-        FocusSearch();
+        if (IsVisible) _relativeTimer.Start();
+        ResetToSearch();
     }
 
     /// <summary>面板展开：焦点直接落在搜索框，输入即筛选。</summary>
-    public void OnExpanded() => FocusSearch();
+    public void OnExpanded() => ResetToSearch();
 
     public bool HandleEscape()
     {
@@ -144,7 +148,11 @@ public partial class ClipboardPage : UserControl, IIslandPage
         return false;
     }
 
-    private void FocusSearch() => Dispatcher.BeginInvoke(DispatcherPriority.Input, () =>
+    /// <summary>只把键盘焦点送回搜索框：不动选中项、不动已有查询词。</summary>
+    private void FocusSearch() => Dispatcher.BeginInvoke(DispatcherPriority.Input, () => SearchBox.Focus());
+
+    /// <summary>面板刚展开 / 切到本页：清选中、聚焦并全选搜索框（下一次输入直接覆盖旧查询）。</summary>
+    private void ResetToSearch() => Dispatcher.BeginInvoke(DispatcherPriority.Input, () =>
     {
         EntryList.SelectedIndex = -1;
         SearchBox.Focus();
@@ -252,6 +260,7 @@ public partial class ClipboardPage : UserControl, IIslandPage
 
     private void OnItemPreviewLeftDown(object sender, MouseButtonEventArgs e)
     {
+        _pressedEntry = null;
         if (sender is not ListBoxItem { DataContext: ClipboardEntry entry }) return;
         if (IsFromButton(e.OriginalSource)) return;
 
@@ -261,21 +270,34 @@ public partial class ClipboardPage : UserControl, IIslandPage
             e.Handled = true;
             SelectOnly(entry);
             _model?.Paste.CopyOnly(entry);
+            return;
         }
-        // Ctrl+单击交给 ListBox 自己切换选中；普通单击也走默认单选
+        // Ctrl+单击交给 ListBox 自己切换选中；焦点随后送回搜索框，继续打字即筛选
+        if ((Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
+        {
+            Dispatcher.BeginInvoke(DispatcherPriority.Input, () => SearchBox.Focus());
+            return;
+        }
+        // 普通单击：记下按下的条目，抬起时必须还是同一条才算"点击"
+        _pressedEntry = entry;
     }
 
     private void OnItemLeftUp(object sender, MouseButtonEventArgs e)
     {
+        var pressed = _pressedEntry;
+        _pressedEntry = null;
         if (sender is not ListBoxItem { DataContext: ClipboardEntry entry }) return;
         if (IsFromButton(e.OriginalSource)) return;
         if ((Keyboard.Modifiers & (ModifierKeys.Shift | ModifierKeys.Control)) != ModifierKeys.None) return;
+        // 按下与抬起不在同一条（拖拽滑出）时不粘贴
+        if (!ReferenceEquals(pressed, entry)) return;
         e.Handled = true;
         Activate(entry);
     }
 
     private void OnItemPreviewRightDown(object sender, MouseButtonEventArgs e)
     {
+        _pressedEntry = null;
         if (sender is not ListBoxItem { DataContext: ClipboardEntry entry } item) return;
         // 右键点在选区外时先切成单选，菜单才对得上
         if (!EntryList.SelectedItems.Contains(entry)) SelectOnly(entry);
@@ -394,18 +416,26 @@ public partial class ClipboardPage : UserControl, IIslandPage
         if (string.IsNullOrEmpty(path)) return;
         try
         {
-            if (File.Exists(path) || Directory.Exists(path))
-                Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true });
+            if (!File.Exists(path) && !Directory.Exists(path))
+            {
+                _model?.Notifications.Post("📋", "文件已不存在");
+                return;
+            }
+            Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true });
         }
         catch
         {
-            // 路径已失效
+            _model?.Notifications.Post("📋", "打开所在文件夹失败");
         }
     }
 
     private void SaveImageAs(ClipboardEntry entry)
     {
-        if (string.IsNullOrEmpty(entry.ImagePath) || !File.Exists(entry.ImagePath)) return;
+        if (string.IsNullOrEmpty(entry.ImagePath) || !File.Exists(entry.ImagePath))
+        {
+            _model?.Notifications.Post("📋", "图片文件已不存在");
+            return;
+        }
         try
         {
             var dlg = new Microsoft.Win32.SaveFileDialog
@@ -417,10 +447,11 @@ public partial class ClipboardPage : UserControl, IIslandPage
             // 岛是 NOACTIVATE，对话框需要一个可激活的临时 owner
             if (DialogOwner.WithOwner(owner => dlg.ShowDialog(owner)) != true) return;
             File.Copy(entry.ImagePath, dlg.FileName, overwrite: true);
+            _model?.Notifications.Post("📋", "图片已保存");
         }
         catch
         {
-            // 磁盘写入失败：静默忽略，不打断面板
+            _model?.Notifications.Post("📋", "图片保存失败");
         }
     }
 
@@ -505,7 +536,7 @@ public partial class ClipboardPage : UserControl, IIslandPage
                 EntryList.SelectedIndex = -1;
                 return;
             }
-            case Key.F or Key.D when ctrl:
+            case Key.F or Key.D when ctrl && !shift:
             {
                 var selection = SelectedEntries();
                 if (selection.Count == 0) return;
