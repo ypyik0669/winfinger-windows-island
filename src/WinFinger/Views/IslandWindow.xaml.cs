@@ -825,6 +825,7 @@ public partial class IslandWindow : Window
                 Key.D3 => AppPage.Notes,
                 Key.D4 => AppPage.Shortcuts,
                 Key.D5 => AppPage.Pomodoro,
+                Key.D6 => AppPage.Chat,
                 _ => null
             };
             if (page is { } p)
@@ -833,10 +834,15 @@ public partial class IslandWindow : Window
                 e.Handled = true;
                 return;
             }
-            // mac ⌘N on the notes page
+            // mac ⌘N on the notes page；对话页上是「新建对话」
             if (e.Key == Key.N && _model.SelectedPage == AppPage.Notes)
             {
                 _model.RequestNewNote();
+                e.Handled = true;
+            }
+            else if (e.Key == Key.N && _model.SelectedPage == AppPage.Chat)
+            {
+                _model.RequestNewChat();
                 e.Handled = true;
             }
         }

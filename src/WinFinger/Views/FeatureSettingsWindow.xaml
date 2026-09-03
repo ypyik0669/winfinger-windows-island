@@ -111,6 +111,22 @@
                     <TextBlock x:Name="TestResultText" Style="{StaticResource Text.SmallLabel}"
                                TextWrapping="Wrap" Visibility="Collapsed"/>
 
+                    <!-- ═══ AI 对话 ═══ -->
+                    <TextBlock Text="AI 对话" Style="{StaticResource Text.SectionLabel}" Margin="0,18,0,0"/>
+
+                    <TextBlock Text="对话模型（留空跟随上面的模型）" Style="{StaticResource Text.SmallLabel}"/>
+                    <TextBox x:Name="ChatModelBox" Style="{StaticResource TextBox.Dark}"
+                             LostFocus="OnChatModelCommit" KeyDown="OnEnterCommits"/>
+
+                    <TextBlock Text="系统提示词（留空用内置的）" Style="{StaticResource Text.SmallLabel}"/>
+                    <TextBox x:Name="ChatPromptBox" Style="{StaticResource TextBox.Dark}" AcceptsReturn="True"
+                             TextWrapping="Wrap" Height="60" VerticalScrollBarVisibility="Auto"
+                             LostFocus="OnChatPromptCommit"/>
+
+                    <TextBlock Text="每次带上的历史字符数（1000 – 40000）" Style="{StaticResource Text.SmallLabel}"/>
+                    <TextBox x:Name="ChatContextBox" Style="{StaticResource TextBox.Dark}" Width="90"
+                             HorizontalAlignment="Left" LostFocus="OnChatContextCommit" KeyDown="OnEnterCommits"/>
+
                     <!-- ═══ 动作 ═══ -->
                     <TextBlock Text="动作" Style="{StaticResource Text.SectionLabel}" Margin="0,18,0,0"/>
                     <TextBlock x:Name="ActionCountText" Style="{StaticResource Text.SmallLabel}"/>

@@ -375,6 +375,14 @@ public partial class ResultDrawer : UserControl, IResultPresenter
                 _model.Notifications.Post("📋", "条目已更新");
             }, hasText));
 
+        if (_actions.HasFlag(ResultActions.Continue))
+            Footer.Children.Add(FooterButton("继续追问", "Button.Secondary", () =>
+            {
+                if (_model is null) return;
+                _model.ContinueInChat(ResultText, _sourceEntry);
+                Close();
+            }, hasText));
+
         if (_actions.HasFlag(ResultActions.AppendEntry))
             Footer.Children.Add(FooterButton("追加为新条目", "Button.Secondary", () =>
             {

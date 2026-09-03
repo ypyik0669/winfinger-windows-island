@@ -11,7 +11,8 @@ public enum AppPage
     Media,
     Notes,
     Shortcuts,
-    Pomodoro
+    Pomodoro,
+    Chat
 }
 
 public static class AppPageInfo
@@ -24,6 +25,7 @@ public static class AppPageInfo
         AppPage.Notes => "便利贴",
         AppPage.Shortcuts => "快捷键",
         AppPage.Pomodoro => "番茄钟",
+        AppPage.Chat => "对话",
         _ => ""
     };
 
@@ -35,6 +37,7 @@ public static class AppPageInfo
         AppPage.Notes => "\uE70B",     // note.text
         AppPage.Shortcuts => "\uE765", // command
         AppPage.Pomodoro => "\uE823",  // timer
+        AppPage.Chat => "\uE8BD",      // message
         _ => ""
     };
 }
@@ -60,6 +63,7 @@ public sealed partial class AppViewModel : ObservableObject
     public ClipboardStore ClipboardStore { get; } = new();
     public ClipboardMonitorService ClipboardMonitor { get; }
     public NoteStore Notes { get; } = new();
+    public ChatStore Chat { get; } = new();
     public ShortcutCatalogService ShortcutCatalog { get; } = new();
     public ForegroundAppService ForegroundApp { get; } = new();
     public MediaService Media { get; } = new();
@@ -75,6 +79,7 @@ public sealed partial class AppViewModel : ObservableObject
     public OcrService Ocr { get; } = new();
     public ScreenshotService Screenshot { get; }
     public AiService Ai { get; }
+    public ChatService ChatStream { get; }
     public ActionCatalogService Actions { get; }
 
     /// <summary>动作执行器（结果抽屉挂上来之后才有）。</summary>
@@ -91,6 +96,12 @@ public sealed partial class AppViewModel : ObservableObject
     /// <summary>Raised by the window layer when Ctrl+N is pressed while the notes page is showing.</summary>
     public event Action? NewNoteRequested;
 
+    /// <summary>Ctrl+N 在对话页 = 新建对话。</summary>
+    public event Action? NewChatRequested;
+
+    /// <summary>让对话页显示某个会话，并把文本填进输入框（不自动发送）。</summary>
+    public event Action<Models.ChatSession, string, string?>? ChatPrefillRequested;
+
     /// <summary>请求打开"功能设置"窗口（Task 14 接管；未接管时只提示）。</summary>
     public event Action? FeatureSettingsRequested;
 
@@ -99,6 +110,8 @@ public sealed partial class AppViewModel : ObservableObject
         ClipboardMonitor = new ClipboardMonitorService(ClipboardStore, ForegroundApp, SettingsStore);
         Paste = new PasteService(ClipboardMonitor, ClipboardStore, FocusRestore, this, Notifications);
         Ai = new AiService(SettingsStore);
+        ChatStream = new ChatService(Ai, Chat, SettingsStore);
+        EntryActionProviders.Add(new ChatEntryActionProvider(this));
         Actions = new ActionCatalogService(Notifications);
         Screenshot = new ScreenshotService(this);
         ActionCatalogService.Current = Actions;
@@ -265,6 +278,7 @@ public sealed partial class AppViewModel : ObservableObject
 
     public void Stop()
     {
+        ChatStream.Stop();
         _autoOcrStopped = true;
         _autoOcrCts.Cancel();
         _autoOcrCts.Dispose();
@@ -309,4 +323,35 @@ public sealed partial class AppViewModel : ObservableObject
     }
 
     public void RequestNewNote() => NewNoteRequested?.Invoke();
+
+    public void RequestNewChat() => NewChatRequested?.Invoke();
+
+    /// <summary>抽屉里的 AI 结果「继续追问」：把原文与结果作为一轮历史放进新会话，输入框留空。</summary>
+    public void ContinueInChat(string result, Models.ClipboardEntry? source)
+    {
+        if (string.IsNullOrWhiteSpace(result)) return;
+        var session = Chat.Create(ChatPrompt());
+        string? origin = source?.Text ?? source?.OcrText;
+        if (!string.IsNullOrWhiteSpace(origin)) Chat.AppendUser(session, origin!, "来自剪贴板");
+        Chat.AppendAssistant(session, result);
+        Select(AppPage.Chat);
+        ChatPrefillRequested?.Invoke(session, "", null);
+    }
+
+    /// <summary>剪贴板条目送进对话页：切页并把文本填进输入框，等用户补一句要求再发。</summary>
+    public void SendToChat(string text, string? source = null)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return;
+        // 最新的会话还是空的就复用它，避免右键几次攒出一堆空会话
+        var session = Chat.Sessions.FirstOrDefault() is { Messages.Count: 0 } empty
+            ? empty
+            : Chat.Create(ChatPrompt());
+        Select(AppPage.Chat);
+        ChatPrefillRequested?.Invoke(session, text, source);
+    }
+
+    /// <summary>建会话时用的系统提示词：设置里留空就用内置的。</summary>
+    public string ChatPrompt() => string.IsNullOrWhiteSpace(SettingsStore.Settings.ChatSystemPrompt)
+        ? AiService.ChatSystemPrompt
+        : SettingsStore.Settings.ChatSystemPrompt;
 }

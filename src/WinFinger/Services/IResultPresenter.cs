@@ -18,6 +18,9 @@ public enum ResultActions
     Translate = 64,
     Ai = 128,
 
+    /// <summary>把这条结果搬进 AI 对话页继续追问（只给真正的 AI 输出用）。</summary>
+    Continue = 256,
+
     /// <summary>文本结果的常用组合。</summary>
     Text = Copy | Paste | AppendEntry | SaveFile | Translate | Ai
 }

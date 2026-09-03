@@ -39,6 +39,7 @@ public partial class ExpandedPanelView : UserControl
         _pages[AppPage.Notes] = new NotesPage();
         _pages[AppPage.Shortcuts] = new ShortcutsPage();
         _pages[AppPage.Pomodoro] = new PomodoroPage();
+        _pages[AppPage.Chat] = new ChatPage();
         foreach (var page in _pages.Values)
             (page as IIslandPage)?.Initialize(model);
 

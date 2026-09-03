@@ -24,6 +24,8 @@ public partial class FeatureSettingsWindow : Window
         ("自动", "auto"), ("中文", "zh"), ("英文", "en"), ("日文", "ja")
     };
 
+    private const int MinChatContextChars = 1000;
+    private const int MaxChatContextChars = 40000;
     private const int MinTimeoutSeconds = 5;
     private const int MaxTimeoutSeconds = 300;
 
@@ -92,6 +94,9 @@ public partial class FeatureSettingsWindow : Window
         SelectByTag(TargetLanguageCombo, string.IsNullOrWhiteSpace(S.AiTargetLanguage) ? "auto" : S.AiTargetLanguage);
 
         TimeoutBox.Text = S.AiTimeoutSeconds.ToString();
+        ChatModelBox.Text = S.ChatModel;
+        ChatPromptBox.Text = S.ChatSystemPrompt;
+        ChatContextBox.Text = S.ChatContextChars.ToString();
         RefreshApiKeyUi();
     }
 
@@ -239,6 +244,29 @@ public partial class FeatureSettingsWindow : Window
         if (int.TryParse(TimeoutBox.Text.Trim(), out int seconds))
             S.AiTimeoutSeconds = Math.Clamp(seconds, MinTimeoutSeconds, MaxTimeoutSeconds);
         TimeoutBox.Text = S.AiTimeoutSeconds.ToString();
+        _model.SettingsStore.Save();
+    }
+
+    private void OnChatModelCommit(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        S.ChatModel = ChatModelBox.Text.Trim();
+        _model.SettingsStore.Save();
+    }
+
+    private void OnChatPromptCommit(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        S.ChatSystemPrompt = ChatPromptBox.Text.Trim();
+        _model.SettingsStore.Save();
+    }
+
+    private void OnChatContextCommit(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        if (int.TryParse(ChatContextBox.Text.Trim(), out int chars))
+            S.ChatContextChars = Math.Clamp(chars, MinChatContextChars, MaxChatContextChars);
+        ChatContextBox.Text = S.ChatContextChars.ToString();
         _model.SettingsStore.Save();
     }
 

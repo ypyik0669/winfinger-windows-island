@@ -55,7 +55,7 @@ public partial class App : Application
         }
 
         // dev hook: WINFINGER_AUTOEXPAND=<page index 1-5> expands to that page 2s after startup
-        if (int.TryParse(Environment.GetEnvironmentVariable("WINFINGER_AUTOEXPAND"), out int autoPage) && autoPage is >= 1 and <= 5)
+        if (int.TryParse(Environment.GetEnvironmentVariable("WINFINGER_AUTOEXPAND"), out int autoPage) && autoPage is >= 1 and <= 6)
         {
             var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
             t.Tick += (_, _) =>
@@ -94,6 +94,7 @@ public partial class App : Application
         if (_ownsMutex)
         {
             try { Model.ClipboardStore.SaveNow(); } catch (Exception ex) { LogCrash(ex); }
+            try { Model.Chat.SaveNow(); } catch (Exception ex) { LogCrash(ex); }
             try { Model.Stop(); } catch (Exception ex) { LogCrash(ex); }
             try { _singleInstanceMutex?.ReleaseMutex(); } catch (ApplicationException) { }
         }

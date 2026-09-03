@@ -468,7 +468,7 @@ public sealed class ActionExecutor
         CancelStream();
         var cts = new CancellationTokenSource();
         _streamCts = cts;
-        _presenter.ShowStreaming(title, ResultActions.Text, cts, entry);
+        _presenter.ShowStreaming(title, ResultActions.Text | ResultActions.Continue, cts, entry);
         var sb = new StringBuilder();
         string? error = null;
         try

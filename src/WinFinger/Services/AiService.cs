@@ -35,6 +35,9 @@ public readonly record struct SseEvent(SseKind Kind, string Text)
     public static readonly SseEvent Done = new(SseKind.Done, "");
 }
 
+/// <summary>请求体里的一条消息（role + content），多轮对话按顺序传一串。</summary>
+public readonly record struct ChatTurn(string Role, string Content);
+
 /// <summary>
 /// OpenAI 兼容的 Chat Completions 客户端（流式）。BaseUrl / Model / Key / 超时都来自设置。
 /// </summary>
@@ -42,6 +45,22 @@ public sealed class AiService
 {
     /// <summary>翻译动作使用的系统提示词。</summary>
     public const string TranslateSystemPrompt = "你是专业翻译，只输出译文，不解释。";
+
+    /// <summary>AI 对话页的默认系统提示词（用户可在功能设置里改）。</summary>
+    public const string ChatSystemPrompt = "你是一个简洁、直接的中文助手。回答用 markdown，代码放进围栏代码块。";
+
+    public const string RoleSystem = "system";
+    public const string RoleUser = "user";
+    public const string RoleAssistant = "assistant";
+
+    /// <summary>单轮动作（翻译 / 总结）要稳定，温度低。</summary>
+    public const double ActionTemperature = 0.3;
+
+    /// <summary>多轮对话温度高一点，回答自然些。</summary>
+    public const double ChatTemperature = 0.7;
+
+    /// <summary>多轮对话的绝对时长上限：空闲超时之外再兜一层，防止只发心跳的服务端占住连接。</summary>
+    public const int ChatMaxSeconds = 900;
 
     private static readonly HttpClient Http = CreateClient();
 
@@ -66,21 +85,41 @@ public sealed class AiService
         return client;
     }
 
-    /// <summary>流式对话；逐段 yield 增量文本。失败抛 <see cref="AiException"/>（消息已本地化）。</summary>
-    public async IAsyncEnumerable<string> StreamChatAsync(string systemPrompt, string userPrompt,
-        [EnumeratorCancellation] CancellationToken ct)
+    /// <summary>单轮流式对话（system + user）：翻译 / 总结 等动作走这里，语义保持不变。</summary>
+    public IAsyncEnumerable<string> StreamChatAsync(string systemPrompt, string userPrompt,
+        CancellationToken ct)
+    {
+        var turns = new[] { new ChatTurn(RoleSystem, systemPrompt), new ChatTurn(RoleUser, userPrompt) };
+        return StreamCoreAsync(turns, model: null, ActionTemperature, idleTimeout: false, ct);
+    }
+
+    /// <summary>
+    /// 多轮流式对话。超时改成「空闲超时」：收到任意一行（含 SSE 心跳注释、思维链增量）就重置计时，
+    /// 一个 3 分钟才写完的长回答不会被整体墙钟超时腰斩；另有 <see cref="ChatMaxSeconds"/> 绝对上限兜底，
+    /// 防止只发心跳不出内容的服务端把连接永久占住。
+    /// </summary>
+    public IAsyncEnumerable<string> StreamChatAsync(IReadOnlyList<ChatTurn> messages, string? model,
+        CancellationToken ct)
+        => StreamCoreAsync(messages, model, ChatTemperature, idleTimeout: true, ct);
+
+    private async IAsyncEnumerable<string> StreamCoreAsync(IReadOnlyList<ChatTurn> messages, string? model,
+        double temperature, bool idleTimeout, [EnumeratorCancellation] CancellationToken ct)
     {
         string? key = _settings.GetAiApiKey();
         if (string.IsNullOrWhiteSpace(key)) throw new AiException("未配置 API Key");
+        if (messages.Count == 0) throw new AiException("没有可发送的内容");
 
         var cfg = _settings.Settings;
         int timeout = cfg.AiTimeoutSeconds > 0 ? cfg.AiTimeoutSeconds : Defaults.AiTimeoutSeconds;
 
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        linked.CancelAfter(TimeSpan.FromSeconds(timeout));
-        var token = linked.Token;
+        // cap：绝对上限（只有多轮对话用）；gate：建连超时 / 空闲超时，读到一行就重新计时
+        using var cap = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        if (idleTimeout) cap.CancelAfter(TimeSpan.FromSeconds(ChatMaxSeconds));
+        using var gate = CancellationTokenSource.CreateLinkedTokenSource(cap.Token);
+        gate.CancelAfter(TimeSpan.FromSeconds(timeout));
+        var token = gate.Token;
 
-        using var request = BuildRequest(cfg, key, systemPrompt, userPrompt, stream: true);
+        using var request = BuildRequest(cfg, key, messages, stream: true, maxTokens: null, model, temperature);
 
         HttpResponseMessage response;
         try
@@ -135,10 +174,22 @@ public sealed class AiService
                     }
                     catch (OperationCanceledException) when (!ct.IsCancellationRequested)
                     {
-                        throw new AiException($"请求超时（{timeout} s）");
+                        // 先判绝对上限，否则会把「生成太久」误报成「连接中断」
+                        if (cap.IsCancellationRequested)
+                            throw new AiException($"生成时间超过上限（{ChatMaxSeconds} s），已停止");
+                        throw new AiException(idleTimeout
+                            ? $"连接中断：{timeout} s 没有收到新数据"
+                            : $"请求超时（{timeout} s）");
                     }
 
                     if (line is null) yield break;
+
+                    // 收到任何一行都算「还活着」：心跳注释、空 delta、思维链增量都要重置空闲计时
+                    if (idleTimeout)
+                    {
+                        try { gate.CancelAfter(TimeSpan.FromSeconds(timeout)); }
+                        catch (ObjectDisposedException) { yield break; }
+                    }
 
                     var evt = ParseSseLine(line);
                     switch (evt.Kind)
@@ -277,31 +328,46 @@ public sealed class AiService
         }
     }
 
+    /// <summary>单轮请求（system + user）：TestAsync 与旧调用方走这里，请求体与改动前逐字节一致。</summary>
     private static HttpRequestMessage BuildRequest(AppSettings cfg, string key, string systemPrompt,
         string userPrompt, bool stream, int? maxTokens = null)
+        => BuildRequest(cfg, key,
+            new[] { new ChatTurn(RoleSystem, systemPrompt), new ChatTurn(RoleUser, userPrompt) },
+            stream, maxTokens, model: null, temperature: ActionTemperature);
+
+    private static HttpRequestMessage BuildRequest(AppSettings cfg, string key, IReadOnlyList<ChatTurn> messages,
+        bool stream, int? maxTokens, string? model, double temperature)
     {
         string baseUrl = (cfg.AiBaseUrl ?? "").Trim().TrimEnd('/');
         if (baseUrl.Length == 0) baseUrl = Defaults.AiBaseUrl.TrimEnd('/');
 
-        var payload = new Dictionary<string, object?>
-        {
-            ["model"] = string.IsNullOrWhiteSpace(cfg.AiModel) ? Defaults.AiModel : cfg.AiModel,
-            ["stream"] = stream,
-            ["temperature"] = 0.3,
-            ["messages"] = new object[]
-            {
-                new Dictionary<string, string> { ["role"] = "system", ["content"] = systemPrompt },
-                new Dictionary<string, string> { ["role"] = "user", ["content"] = userPrompt }
-            }
-        };
-        if (maxTokens is { } max) payload["max_tokens"] = max;
-
         var request = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/chat/completions")
         {
-            Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
+            Content = new StringContent(BuildPayloadJson(cfg, messages, stream, maxTokens, model, temperature),
+                Encoding.UTF8, "application/json")
         };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
         return request;
+    }
+
+    /// <summary>请求体序列化（抽出来是为了单测能断言消息顺序 / 模型覆盖，不用真发 HTTP）。</summary>
+    internal static string BuildPayloadJson(AppSettings cfg, IReadOnlyList<ChatTurn> messages, bool stream,
+        int? maxTokens, string? model, double temperature)
+    {
+        string picked = !string.IsNullOrWhiteSpace(model) ? model!
+            : string.IsNullOrWhiteSpace(cfg.AiModel) ? Defaults.AiModel : cfg.AiModel;
+
+        var payload = new Dictionary<string, object?>
+        {
+            ["model"] = picked,
+            ["stream"] = stream,
+            ["temperature"] = temperature,
+            ["messages"] = messages
+                .Select(m => new Dictionary<string, string> { ["role"] = m.Role, ["content"] = m.Content })
+                .ToArray()
+        };
+        if (maxTokens is { } max) payload["max_tokens"] = max;
+        return JsonSerializer.Serialize(payload);
     }
 
     /// <summary>把非 2xx 响应映射成友好的中文错误（永不回显 API Key）。</summary>

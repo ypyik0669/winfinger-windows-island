@@ -58,7 +58,14 @@ public sealed class AppSettings
     public string AiApiKeyProtected { get; set; } = "";
     public string AiModel { get; set; } = "gpt-4o-mini";
     public string AiTargetLanguage { get; set; } = "auto";
+    /// <summary>单轮动作是整段超时；多轮对话里这个值改成「多久没收到新数据算断」。</summary>
     public int AiTimeoutSeconds { get; set; } = 60;
+    /// <summary>AI 对话页的系统提示词，留空用内置的。建会话时快照进会话，改它不影响旧对话。</summary>
+    public string ChatSystemPrompt { get; set; } = "";
+    /// <summary>每次请求带上的历史字符预算，超出的旧消息整条丢弃。</summary>
+    public int ChatContextChars { get; set; } = 6000;
+    /// <summary>对话页专用模型，留空跟随 AiModel。</summary>
+    public string ChatModel { get; set; } = "";
 }
 
 /// <summary>settings.json persistence + the HKCU Run auto-start key.</summary>

@@ -6,6 +6,51 @@ namespace WinFinger.Tests;
 public class AiServiceTests
 {
     [Fact]
+    public void BuildPayloadJson_KeepsMessageOrderAndRoles()
+    {
+        var cfg = new AppSettings { AiModel = "m1" };
+        var turns = new[]
+        {
+            new ChatTurn("system", "s"),
+            new ChatTurn("user", "u1"),
+            new ChatTurn("assistant", "a1"),
+            new ChatTurn("user", "u2")
+        };
+
+        string json = AiService.BuildPayloadJson(cfg, turns, stream: true, maxTokens: null, model: null,
+            temperature: AiService.ChatTemperature);
+
+        int s1 = json.IndexOf("\"u1\"", StringComparison.Ordinal);
+        int a1 = json.IndexOf("\"a1\"", StringComparison.Ordinal);
+        int u2 = json.IndexOf("\"u2\"", StringComparison.Ordinal);
+        Assert.True(s1 > 0 && s1 < a1 && a1 < u2);
+        Assert.Contains("\"role\":\"assistant\"", json);
+        Assert.Contains("\"stream\":true", json);
+        Assert.Contains("\"model\":\"m1\"", json);
+    }
+
+    [Fact]
+    public void BuildPayloadJson_ModelOverrideBeatsSettings()
+    {
+        var cfg = new AppSettings { AiModel = "settings-model" };
+        string json = AiService.BuildPayloadJson(cfg, new[] { new ChatTurn("user", "hi") },
+            stream: false, maxTokens: 1, model: "override-model", temperature: 0.3);
+
+        Assert.Contains("\"model\":\"override-model\"", json);
+        Assert.Contains("\"max_tokens\":1", json);
+        Assert.Contains("\"stream\":false", json);
+    }
+
+    [Fact]
+    public void BuildPayloadJson_BlankModel_FallsBackToDefault()
+    {
+        string json = AiService.BuildPayloadJson(new AppSettings { AiModel = "  " },
+            new[] { new ChatTurn("user", "hi") }, stream: true, maxTokens: null, model: null, temperature: 0.3);
+
+        Assert.Contains("\"model\":\"gpt-4o-mini\"", json);
+    }
+
+    [Fact]
     public void ParseSseLine_DataDelta_ReturnsContent()
     {
         var evt = AiService.ParseSseLine("data: {\"choices\":[{\"delta\":{\"content\":\"x\"}}]}");
