@@ -110,6 +110,14 @@ public partial class ClipboardPage : UserControl, IIslandPage
         EntryList.PreviewKeyDown += (_, e) => HandleListKey(e);
         // 鼠标滑出列表就作废这次按下，别在别处抬起时误粘贴
         EntryList.MouseLeave += (_, _) => _pressedEntry = null;
+        // 滚轮：默认一格滚 3 行（像素模式下约 1.5 张卡），太冲；改成一格约 2/3 张卡
+        EntryList.PreviewMouseWheel += (_, e) =>
+        {
+            var scroller = _listScroller ??= FindScroller(EntryList);
+            if (scroller is null) return;
+            scroller.ScrollToVerticalOffset(scroller.VerticalOffset - e.Delta * WheelPixelsPerDelta);
+            e.Handled = true;
+        };
 
         EditSaveButton.Click += (_, _) => CommitEdit();
         EditCancelButton.Click += (_, _) => CloseEdit();
@@ -547,6 +555,20 @@ public partial class ClipboardPage : UserControl, IIslandPage
         {
             _model?.Notifications.Post("📋", "图片保存失败");
         }
+    }
+
+    private const double WheelPixelsPerDelta = 0.55; // 120 delta ≈ 66px
+    private ScrollViewer? _listScroller;
+
+    private static ScrollViewer? FindScroller(DependencyObject root)
+    {
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is ScrollViewer sv) return sv;
+            if (FindScroller(child) is { } found) return found;
+        }
+        return null;
     }
 
     // ── edit popup ──
