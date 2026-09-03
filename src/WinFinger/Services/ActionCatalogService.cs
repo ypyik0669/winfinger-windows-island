@@ -249,6 +249,23 @@ public sealed class ActionCatalogService
         }
     }
 
+    /// <summary>把用户的 actions.json 覆盖回内置默认内容并重载；写失败返回 false。</summary>
+    public bool RestoreDefaults()
+    {
+        try
+        {
+            Directory.CreateDirectory(StoragePaths.Root);
+            File.WriteAllText(ActionsPath, ReadEmbeddedText() ?? "[]");
+        }
+        catch
+        {
+            LastError = "actions.json 写入失败";
+            return false;
+        }
+        Reload();
+        return LastError is null;
+    }
+
     // ── files ──
 
     private void EnsureUserFile()

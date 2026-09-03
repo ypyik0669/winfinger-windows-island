@@ -1,0 +1,133 @@
+<Window x:Class="WinFinger.Views.FeatureSettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:c="clr-namespace:WinFinger.Controls"
+        Title="WinFinger 功能设置"
+        Width="420" Height="640"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        Topmost="True" ShowInTaskbar="False" ResizeMode="NoResize"
+        WindowStartupLocation="CenterScreen"
+        MouseLeftButtonDown="OnDragWindow">
+
+    <Border CornerRadius="16" Background="#F2141419" BorderThickness="1.2"
+            BorderBrush="{DynamicResource Brush.GlassRim}">
+        <DockPanel Margin="20,14,20,18">
+            <Grid DockPanel.Dock="Top" Margin="0,0,0,10">
+                <TextBlock Text="功能设置" FontSize="16" FontWeight="SemiBold"
+                           Foreground="{DynamicResource Brush.TextPrimary}"/>
+                <Button Content="✕" HorizontalAlignment="Right" Width="26" Height="26"
+                        Background="Transparent" BorderThickness="0"
+                        Foreground="{DynamicResource Brush.TextSecondary}" Cursor="Hand"
+                        Click="OnClose"/>
+            </Grid>
+
+            <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,6,0">
+                <StackPanel>
+
+                    <!-- ═══ 快捷键 ═══ -->
+                    <TextBlock Text="快捷键" Style="{StaticResource Text.SectionLabel}"/>
+
+                    <TextBlock Text="唤起剪贴板面板" Style="{StaticResource Text.SmallLabel}"/>
+                    <c:HotkeyCaptureBox x:Name="ClipboardHotkeyBox" Style="{StaticResource TextBox.Dark}"
+                                        GestureChanged="OnClipboardHotkeyChanged"/>
+                    <TextBlock x:Name="ClipboardHotkeyError" Style="{StaticResource Text.SmallLabel}"
+                               Foreground="{DynamicResource Brush.Danger}" Margin="0,3,0,0"
+                               Text="已被其他程序占用" Visibility="Collapsed"/>
+
+                    <TextBlock Text="区域截图" Style="{StaticResource Text.SmallLabel}"/>
+                    <c:HotkeyCaptureBox x:Name="ScreenshotHotkeyBox" Style="{StaticResource TextBox.Dark}"
+                                        GestureChanged="OnScreenshotHotkeyChanged"/>
+                    <TextBlock x:Name="ScreenshotHotkeyError" Style="{StaticResource Text.SmallLabel}"
+                               Foreground="{DynamicResource Brush.Danger}" Margin="0,3,0,0"
+                               Text="已被其他程序占用" Visibility="Collapsed"/>
+
+                    <TextBlock Text="截图识字" Style="{StaticResource Text.SmallLabel}"/>
+                    <c:HotkeyCaptureBox x:Name="ScreenshotOcrHotkeyBox" Style="{StaticResource TextBox.Dark}"
+                                        GestureChanged="OnScreenshotOcrHotkeyChanged"/>
+                    <TextBlock x:Name="ScreenshotOcrHotkeyError" Style="{StaticResource Text.SmallLabel}"
+                               Foreground="{DynamicResource Brush.Danger}" Margin="0,3,0,0"
+                               Text="已被其他程序占用" Visibility="Collapsed"/>
+
+                    <CheckBox x:Name="PasteAfterSelectCheck" Content="单击条目直接粘贴（关闭则仅复制）"
+                              Margin="0,12,0,0" Foreground="{DynamicResource Brush.TextPrimary}"
+                              Checked="OnPasteAfterSelectChanged" Unchecked="OnPasteAfterSelectChanged"/>
+
+                    <!-- ═══ OCR ═══ -->
+                    <TextBlock Text="文字识别（OCR）" Style="{StaticResource Text.SectionLabel}" Margin="0,18,0,0"/>
+
+                    <CheckBox x:Name="OcrAutoCheck" Content="新图片自动识别文字（图片内容可被搜索）"
+                              Margin="0,8,0,0" Foreground="{DynamicResource Brush.TextPrimary}"
+                              Checked="OnOcrAutoChanged" Unchecked="OnOcrAutoChanged"/>
+
+                    <TextBlock Text="识别语言" Style="{StaticResource Text.SmallLabel}"/>
+                    <ComboBox x:Name="OcrLanguageCombo" Style="{StaticResource ComboBox.Dark}"
+                              SelectionChanged="OnOcrLanguageChanged"/>
+
+                    <TextBlock x:Name="OcrUnavailableText" Style="{StaticResource Text.SmallLabel}"
+                               Foreground="{DynamicResource Brush.Warning}" TextWrapping="Wrap"
+                               Visibility="Collapsed"/>
+                    <Button x:Name="OcrLanguageSettingsButton" Content="打开语言设置"
+                            Style="{StaticResource Button.Secondary}" HorizontalAlignment="Left"
+                            Margin="0,6,0,0" Visibility="Collapsed" Click="OnOpenLanguageSettings"/>
+
+                    <!-- ═══ AI ═══ -->
+                    <TextBlock Text="AI" Style="{StaticResource Text.SectionLabel}" Margin="0,18,0,0"/>
+
+                    <TextBlock Text="接口地址（Base URL）" Style="{StaticResource Text.SmallLabel}"/>
+                    <TextBox x:Name="BaseUrlBox" Style="{StaticResource TextBox.Dark}"
+                             LostFocus="OnBaseUrlCommit" KeyDown="OnEnterCommits"/>
+
+                    <TextBlock x:Name="ApiKeyLabel" Text="API Key" Style="{StaticResource Text.SmallLabel}"/>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <PasswordBox x:Name="ApiKeyBox" Grid.Column="0" Style="{StaticResource PasswordBox.Dark}"
+                                     LostFocus="OnApiKeyCommit"/>
+                        <Button Grid.Column="1" Content="保存" Margin="8,0,0,0"
+                                Style="{StaticResource Button.Secondary}" Click="OnSaveApiKey"/>
+                        <Button x:Name="ClearKeyButton" Grid.Column="2" Content="清除" Margin="6,0,0,0"
+                                Style="{StaticResource Button.Danger}" Click="OnClearApiKey"/>
+                    </Grid>
+
+                    <TextBlock Text="模型" Style="{StaticResource Text.SmallLabel}"/>
+                    <ComboBox x:Name="ModelCombo" Style="{StaticResource ComboBox.Dark}" IsEditable="True"
+                              LostFocus="OnModelCommit" SelectionChanged="OnModelSelectionChanged"/>
+
+                    <TextBlock Text="翻译目标语言" Style="{StaticResource Text.SmallLabel}"/>
+                    <ComboBox x:Name="TargetLanguageCombo" Style="{StaticResource ComboBox.Dark}"
+                              SelectionChanged="OnTargetLanguageChanged"/>
+
+                    <TextBlock Text="超时秒数（5 – 300）" Style="{StaticResource Text.SmallLabel}"/>
+                    <TextBox x:Name="TimeoutBox" Style="{StaticResource TextBox.Dark}" Width="90"
+                             HorizontalAlignment="Left" LostFocus="OnTimeoutCommit" KeyDown="OnEnterCommits"/>
+
+                    <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                        <Button x:Name="TestButton" Content="测试连接" Style="{StaticResource Button.Primary}"
+                                Click="OnTestConnection"/>
+                    </StackPanel>
+                    <TextBlock x:Name="TestResultText" Style="{StaticResource Text.SmallLabel}"
+                               TextWrapping="Wrap" Visibility="Collapsed"/>
+
+                    <!-- ═══ 动作 ═══ -->
+                    <TextBlock Text="动作" Style="{StaticResource Text.SectionLabel}" Margin="0,18,0,0"/>
+                    <TextBlock x:Name="ActionCountText" Style="{StaticResource Text.SmallLabel}"/>
+                    <TextBlock x:Name="ActionErrorText" Style="{StaticResource Text.SmallLabel}"
+                               Foreground="{DynamicResource Brush.Danger}" TextWrapping="Wrap"
+                               Margin="0,2,0,0" Visibility="Collapsed"/>
+                    <WrapPanel Margin="0,8,0,0">
+                        <Button Content="打开 actions.json 所在文件夹" Style="{StaticResource Button.Secondary}"
+                                Margin="0,0,6,6" Click="OnRevealActions"/>
+                        <Button Content="重新加载" Style="{StaticResource Button.Secondary}"
+                                Margin="0,0,6,6" Click="OnReloadActions"/>
+                        <Button Content="恢复默认" Style="{StaticResource Button.Danger}"
+                                Margin="0,0,0,6" Click="OnRestoreActions"/>
+                    </WrapPanel>
+
+                </StackPanel>
+            </ScrollViewer>
+        </DockPanel>
+    </Border>
+</Window>

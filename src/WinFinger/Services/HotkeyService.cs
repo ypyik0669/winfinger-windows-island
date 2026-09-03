@@ -20,7 +20,10 @@ public sealed class HotkeyService : IDisposable
     /// <summary>截图识字热键的固定 id。</summary>
     public const int HotkeyScreenshotOcr = 3;
 
-    private readonly Dictionary<int, Action> _handlers = new();
+    /// <summary>id → 当前生效的注册（修饰键、虚拟键、回调），用于失败回滚。</summary>
+    private readonly Dictionary<int, Binding> _handlers = new();
+
+    private readonly record struct Binding(uint Modifiers, uint Vk, Action Handler);
     private HwndSource? _source;
     private IntPtr _hwnd;
 
@@ -47,7 +50,7 @@ public sealed class HotkeyService : IDisposable
         if (_hwnd == IntPtr.Zero || vk == 0) return false;
         Unregister(id);
         if (!NativeMethods.RegisterHotKey(_hwnd, id, modifiers | NativeMethods.MOD_NOREPEAT, vk)) return false;
-        _handlers[id] = handler;
+        _handlers[id] = new Binding(modifiers, vk, handler);
         return true;
     }
 
@@ -57,15 +60,22 @@ public sealed class HotkeyService : IDisposable
             NativeMethods.UnregisterHotKey(_hwnd, id);
     }
 
-    /// <summary>按手势字符串（如 "Ctrl+Shift+V"）重新绑定。</summary>
+    /// <summary>
+    /// 按手势字符串（如 "Ctrl+Shift+V"）重新绑定。
+    /// 手势非法或新组合被占用时返回 false，并把原来的绑定原样恢复——
+    /// 用户改错一次不该把已有热键弄丢。
+    /// </summary>
     public bool Rebind(int id, string gesture, Action handler)
     {
-        if (!TryParse(gesture, out uint mods, out uint vk))
-        {
-            Unregister(id);
-            return false;
-        }
-        return Register(id, mods, vk, handler);
+        _handlers.TryGetValue(id, out var previous);
+        bool hadPrevious = _handlers.ContainsKey(id);
+
+        if (!TryParse(gesture, out uint mods, out uint vk)) return false;
+        if (Register(id, mods, vk, handler)) return true;
+
+        // 新组合注册失败：Register 已经把旧的解掉了，这里补回去
+        if (hadPrevious) Register(id, previous.Modifiers, previous.Vk, previous.Handler);
+        return false;
     }
 
     /// <summary>解析 "Ctrl+Shift+V" / "Alt+Space" / "Win+Shift+S" 这类手势。</summary>
@@ -144,11 +154,11 @@ public sealed class HotkeyService : IDisposable
 
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
-        if (msg == NativeMethods.WM_HOTKEY && _handlers.TryGetValue((int)wParam, out var handler))
+        if (msg == NativeMethods.WM_HOTKEY && _handlers.TryGetValue((int)wParam, out var binding))
         {
             handled = true;
             // 消息已经在 UI 线程上，异步派发避免在钩子里做重活
-            _source?.Dispatcher.BeginInvoke(handler);
+            _source?.Dispatcher.BeginInvoke(binding.Handler);
         }
         return IntPtr.Zero;
     }

@@ -14,6 +14,7 @@ public partial class App : Application
     private TaskbarIcon? _trayIcon;
     private IslandWindow? _islandWindow;
     private AppearanceWindow? _appearanceWindow;
+    private FeatureSettingsWindow? _featureWindow;
 
     public AppViewModel Model { get; } = new();
 
@@ -41,6 +42,17 @@ public partial class App : Application
         _islandWindow.Show();
 
         CreateTrayIcon();
+
+        // Task 9: AI 动作没配 Key 时直接把功能设置窗口推到用户面前
+        Model.FeatureSettingsRequested += OpenFeatureSettingsWindow;
+
+        // dev hook: WINFINGER_OPENSETTINGS=1 startup 后 1s 打开功能设置窗口（托盘菜单不好自动化）
+        if (Environment.GetEnvironmentVariable("WINFINGER_OPENSETTINGS") == "1")
+        {
+            var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            t.Tick += (_, _) => { t.Stop(); OpenFeatureSettingsWindow(); };
+            t.Start();
+        }
 
         // dev hook: WINFINGER_AUTOEXPAND=<page index 1-5> expands to that page 2s after startup
         if (int.TryParse(Environment.GetEnvironmentVariable("WINFINGER_AUTOEXPAND"), out int autoPage) && autoPage is >= 1 and <= 5)
@@ -115,6 +127,10 @@ public partial class App : Application
         appearanceSettingsItem.Click += (_, _) => OpenAppearanceWindow();
         appearanceMenu.Items.Add(appearanceSettingsItem);
         menu.Items.Add(appearanceMenu);
+
+        var featureSettingsItem = new System.Windows.Controls.MenuItem { Header = "功能设置…" };
+        featureSettingsItem.Click += (_, _) => OpenFeatureSettingsWindow();
+        menu.Items.Add(featureSettingsItem);
 
         // 收起位置: 顶部 / 悬浮 (mac MacFingerDockMode)
         var dockMenu = new System.Windows.Controls.MenuItem { Header = "收起位置" };
@@ -267,6 +283,20 @@ public partial class App : Application
         _appearanceWindow.Closed += (_, _) => _appearanceWindow = null;
         _appearanceWindow.Show();
         _appearanceWindow.Activate();
+    }
+
+    private void OpenFeatureSettingsWindow()
+    {
+        if (_featureWindow is { IsLoaded: true })
+        {
+            _featureWindow.Activate();
+            return;
+        }
+        if (_islandWindow is null) return;
+        _featureWindow = new FeatureSettingsWindow(Model, _islandWindow);
+        _featureWindow.Closed += (_, _) => _featureWindow = null;
+        _featureWindow.Show();
+        _featureWindow.Activate();
     }
 
     /// <summary>Draws the island pill as a 32x32 tray icon at runtime (no .ico asset needed).</summary>

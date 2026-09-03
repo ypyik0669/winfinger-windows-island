@@ -689,29 +689,52 @@ public partial class IslandWindow : Window
     /// <summary>注册剪贴板全局热键（默认 Ctrl+Shift+V）。已展开在剪贴板页则再按一次收起。</summary>
     private void RegisterClipboardHotkey()
     {
+        if (ApplyHotkey(Services.HotkeyService.HotkeyClipboard)) return;
         var gesture = _model.SettingsStore.Settings.ClipboardHotkey;
-        if (string.IsNullOrWhiteSpace(gesture)) return;
-        bool ok = _model.Hotkeys.Rebind(Services.HotkeyService.HotkeyClipboard, gesture, () =>
-        {
-            if (_model.IsExpanded && _model.SelectedPage == AppPage.Clipboard) _model.Collapse();
-            else _model.Select(AppPage.Clipboard);
-        });
-        if (!ok) _model.Notifications.Post("⌨", $"快捷键 {gesture} 被占用");
+        if (!string.IsNullOrWhiteSpace(gesture)) _model.Notifications.Post("⌨", $"快捷键 {gesture} 被占用");
     }
 
     /// <summary>注册截图热键（默认 Ctrl+Shift+A 区域截图 / Ctrl+Shift+T 截图识字）。</summary>
     private void RegisterScreenshotHotkeys()
     {
-        var settings = _model.SettingsStore.Settings;
-        Bind(Services.HotkeyService.HotkeyScreenshot, settings.HotkeyScreenshot, false);
-        Bind(Services.HotkeyService.HotkeyScreenshotOcr, settings.HotkeyScreenshotOcr, true);
+        Bind(Services.HotkeyService.HotkeyScreenshot, _model.SettingsStore.Settings.HotkeyScreenshot);
+        Bind(Services.HotkeyService.HotkeyScreenshotOcr, _model.SettingsStore.Settings.HotkeyScreenshotOcr);
 
-        void Bind(int id, string gesture, bool ocr)
+        void Bind(int id, string gesture)
         {
-            if (string.IsNullOrWhiteSpace(gesture)) return;
-            bool ok = _model.Hotkeys.Rebind(id, gesture, () => _ = _model.Screenshot.CaptureToHistoryAsync(ocr));
-            if (!ok) _model.Notifications.Post("⌨", $"截图快捷键 {gesture} 被占用，请在功能设置中更换");
+            if (ApplyHotkey(id) || string.IsNullOrWhiteSpace(gesture)) return;
+            _model.Notifications.Post("⌨", $"截图快捷键 {gesture} 被占用，请在功能设置中更换");
         }
+    }
+
+    /// <summary>
+    /// 按设置里的手势（重新）注册指定 id 的全局热键。
+    /// 手势为空视为"不注册"（返回 true，并解掉旧绑定）；被占用返回 false 且旧绑定保持有效。
+    /// 功能设置窗口改完热键后调这里生效。
+    /// </summary>
+    public bool ApplyHotkey(int id)
+    {
+        var settings = _model.SettingsStore.Settings;
+        var (gesture, handler) = id switch
+        {
+            Services.HotkeyService.HotkeyClipboard => (settings.ClipboardHotkey, (Action)(() =>
+            {
+                if (_model.IsExpanded && _model.SelectedPage == AppPage.Clipboard) _model.Collapse();
+                else _model.Select(AppPage.Clipboard);
+            })),
+            Services.HotkeyService.HotkeyScreenshot => (settings.HotkeyScreenshot,
+                (Action)(() => _ = _model.Screenshot.CaptureToHistoryAsync(false))),
+            Services.HotkeyService.HotkeyScreenshotOcr => (settings.HotkeyScreenshotOcr,
+                (Action)(() => _ = _model.Screenshot.CaptureToHistoryAsync(true))),
+            _ => ("", (Action)(() => { }))
+        };
+
+        if (string.IsNullOrWhiteSpace(gesture))
+        {
+            _model.Hotkeys.Unregister(id);
+            return true;
+        }
+        return _model.Hotkeys.Rebind(id, gesture, handler);
     }
 
     private void OnDisplaySettingsChanged(object? sender, EventArgs e) =>
