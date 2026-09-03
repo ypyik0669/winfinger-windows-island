@@ -308,4 +308,12 @@ public sealed class ClipboardStore
     }
 
     public static string Hash(byte[] data) => Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant();
+
+    /// <summary>文本哈希：先按 maxLength 截断再哈希，保证采集端与写回端口径一致。</summary>
+    public static string TextHash(string text, int maxLength)
+    {
+        int limit = Math.Max(1, maxLength);
+        if (text.Length > limit) text = text[..limit];
+        return Hash(Encoding.UTF8.GetBytes(text));
+    }
 }

@@ -2,7 +2,6 @@ using System.Collections.Specialized;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
-using System.Text;
 using System.Windows;
 using System.Windows.Media.Imaging;
 using WinFinger.Interop;
@@ -36,6 +35,7 @@ internal sealed class ClipboardCaptureWorker : IDisposable
     private readonly Action<CaptureResult> _onCaptured;
     private readonly Func<int> _maxTextLength;
     private readonly AutoResetEvent _signal = new(false);
+    private readonly ManualResetEvent _stop = new(false);
     private readonly Thread _thread;
     private readonly object _gate = new();
 
@@ -60,40 +60,88 @@ internal sealed class ClipboardCaptureWorker : IDisposable
     {
         if (_disposed) return;
         lock (_gate) _pending = request;
-        _signal.Set();
+        Signal();
     }
 
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
-        _signal.Set();
-        _thread.Join(1000);
-        _signal.Dispose();
+        try
+        {
+            _stop.Set();
+            _signal.Set();
+        }
+        catch (ObjectDisposedException)
+        {
+            // 句柄已被回收
+        }
+        // 线程可能正卡在退避/PNG 编码里：只有确认退出后才释放句柄，否则留给 GC 终结
+        if (_thread.Join(1500))
+        {
+            _signal.Dispose();
+            _stop.Dispose();
+        }
+    }
+
+    private void Signal()
+    {
+        try
+        {
+            _signal.Set();
+        }
+        catch (ObjectDisposedException)
+        {
+            // 已释放，忽略
+        }
+    }
+
+    /// <summary>可被 Dispose 打断的等待；返回 false 表示应当退出。</summary>
+    private bool Sleep(int milliseconds)
+    {
+        if (_disposed) return false;
+        try
+        {
+            return !_stop.WaitOne(milliseconds);
+        }
+        catch (ObjectDisposedException)
+        {
+            return false;
+        }
     }
 
     private void Loop()
     {
         while (true)
         {
-            _signal.WaitOne();
-            if (_disposed) return;
-
-            CaptureRequest? request;
-            lock (_gate)
-            {
-                request = _pending;
-                _pending = null;
-            }
-            if (request is null) continue;
-
             try
             {
+                if (_disposed) return;
+                int index;
+                try
+                {
+                    index = WaitHandle.WaitAny(new WaitHandle[] { _stop, _signal });
+                }
+                catch (ObjectDisposedException)
+                {
+                    return;
+                }
+                if (index == 0 || _disposed) return;
+
+                CaptureRequest? request;
+                lock (_gate)
+                {
+                    request = _pending;
+                    _pending = null;
+                }
+                if (request is null) continue;
+
                 var result = ReadWithBackoff(request);
                 if (result is not null && !_disposed) _onCaptured(result);
             }
             catch (Exception ex)
             {
+                // 任何异常都不允许逃出后台线程（否则进程直接崩）
                 Debug.WriteLine($"[ClipboardCaptureWorker] 读取失败: {ex.Message}");
             }
         }
@@ -104,7 +152,7 @@ internal sealed class ClipboardCaptureWorker : IDisposable
     {
         for (int attempt = 0; attempt < Backoffs.Length; attempt++)
         {
-            if (Backoffs[attempt] > 0) Thread.Sleep(Backoffs[attempt]);
+            if (Backoffs[attempt] > 0 && !Sleep(Backoffs[attempt])) return null;
             if (_disposed) return null;
 
             // 序列号已经往前走了：后面还有更新的请求，本次直接放弃
@@ -155,10 +203,19 @@ internal sealed class ClipboardCaptureWorker : IDisposable
             if (Clipboard.ContainsFileDropList())
             {
                 StringCollection drop = Clipboard.GetFileDropList();
-                var paths = drop.Cast<string?>()
-                    .Where(p => !string.IsNullOrWhiteSpace(p) && (File.Exists(p) || Directory.Exists(p)))
-                    .Select(p => Path.GetFullPath(p!))
-                    .ToList();
+                var paths = new List<string>();
+                foreach (var raw in drop.Cast<string?>())
+                {
+                    if (string.IsNullOrWhiteSpace(raw)) continue;
+                    try
+                    {
+                        if (File.Exists(raw) || Directory.Exists(raw)) paths.Add(Path.GetFullPath(raw));
+                    }
+                    catch
+                    {
+                        // 单个畸形路径不影响本次其余文件
+                    }
+                }
                 if (paths.Count > 0)
                     return new CaptureResult(request, ClipboardEntryKind.File, null, false, null, paths,
                         ClipboardStore.FileHash(paths));
@@ -174,7 +231,7 @@ internal sealed class ClipboardCaptureWorker : IDisposable
                     bool truncated = text.Length > limit;
                     if (truncated) text = text[..limit];
                     return new CaptureResult(request, ClipboardEntryKind.Text, text, truncated, null, null,
-                        ClipboardStore.Hash(Encoding.UTF8.GetBytes(text)));
+                        ClipboardStore.TextHash(text, limit));
                 }
             }
 

@@ -1,6 +1,5 @@
 using System.Collections.Specialized;
 using System.IO;
-using System.Text;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media.Imaging;
@@ -24,8 +23,9 @@ public sealed partial class ClipboardMonitorService : ObservableObject
     private ClipboardCaptureWorker? _worker;
     private HwndSource? _source;
     private IntPtr _hwnd;
-    private string? _ignoreHash;      // 我们自己刚写回剪贴板的内容
-    private DateTime _suppressUntil;  // 抑制窗口
+    private string? _ignoreHash;              // 我们自己刚写回剪贴板的内容
+    private ClipboardEntryKind? _ignoreKind;  // 图片写回后系统会重编码成不同字节，只能按类型抑制
+    private DateTime _suppressUntil;          // 抑制窗口
 
     /// <summary>Raised once per successful capture (new entry or a duplicate touch) so the UI can toast.</summary>
     public event Action<ClipboardEntry>? Captured;
@@ -58,10 +58,14 @@ public sealed partial class ClipboardMonitorService : ObservableObject
         _worker = null;
     }
 
-    /// <summary>抑制一次自写回：window 内出现同 hash 的更新时跳过记录。</summary>
-    public void Suppress(string hash, TimeSpan window)
+    /// <summary>
+    /// 抑制一次自写回：window 内命中同 hash 即跳过；
+    /// 传入 kind 时，window 内同类型的采集也一并跳过（图片写回后系统重编码，字节必然不同）。
+    /// </summary>
+    public void Suppress(string hash, TimeSpan window, ClipboardEntryKind? kind = null)
     {
         _ignoreHash = hash;
+        _ignoreKind = kind;
         _suppressUntil = DateTime.UtcNow + window;
     }
 
@@ -73,7 +77,7 @@ public sealed partial class ClipboardMonitorService : ObservableObject
             switch (entry.Kind)
             {
                 case ClipboardEntryKind.Text when entry.Text is { } text:
-                    Suppress(ClipboardStore.Hash(Encoding.UTF8.GetBytes(text)), TimeSpan.FromMilliseconds(2000));
+                    Suppress(TextHash(text), TimeSpan.FromMilliseconds(2000));
                     WithWriteRetry(() => Clipboard.SetText(text, TextDataFormat.UnicodeText));
                     break;
                 case ClipboardEntryKind.Image when _store.ImageData(entry) is { } png:
@@ -103,7 +107,7 @@ public sealed partial class ClipboardMonitorService : ObservableObject
         if (string.IsNullOrEmpty(text)) return;
         try
         {
-            Suppress(ClipboardStore.Hash(Encoding.UTF8.GetBytes(text)), TimeSpan.FromMilliseconds(2000));
+            Suppress(TextHash(text), TimeSpan.FromMilliseconds(2000));
             WithWriteRetry(() => Clipboard.SetText(text, TextDataFormat.UnicodeText));
         }
         catch
@@ -118,7 +122,7 @@ public sealed partial class ClipboardMonitorService : ObservableObject
         if (entry.Kind != ClipboardEntryKind.Text || entry.Text is not { } text || text.Length == 0) return;
         try
         {
-            Suppress(ClipboardStore.Hash(Encoding.UTF8.GetBytes(text)), TimeSpan.FromMilliseconds(2000));
+            Suppress(TextHash(text), TimeSpan.FromMilliseconds(2000));
             var data = new DataObject();
             data.SetData(DataFormats.UnicodeText, text);
             WithWriteRetry(() => Clipboard.SetDataObject(data, true));
@@ -135,7 +139,7 @@ public sealed partial class ClipboardMonitorService : ObservableObject
         if (png.Length == 0) return;
         try
         {
-            Suppress(ClipboardStore.Hash(png), TimeSpan.FromMilliseconds(2000));
+            Suppress(ClipboardStore.Hash(png), TimeSpan.FromMilliseconds(2000), ClipboardEntryKind.Image);
             var image = new BitmapImage();
             image.BeginInit();
             image.CacheOption = BitmapCacheOption.OnLoad;
@@ -155,11 +159,16 @@ public sealed partial class ClipboardMonitorService : ObservableObject
         if (msg == NativeMethods.WM_CLIPBOARDUPDATE)
         {
             if (!IsPaused)
+            {
+                // 前台还没见过任何非本应用的窗口时保持旧语义：来源留空（UI 显示“未知应用”）
+                var sourceId = _foreground.ProcessName;
+                var sourceName = string.IsNullOrEmpty(sourceId) ? null : _foreground.DisplayName;
                 _worker?.Enqueue(new CaptureRequest(
                     NativeMethods.GetClipboardSequenceNumber(),
-                    _foreground.ProcessName,
-                    _foreground.DisplayName,
+                    sourceId,
+                    sourceName,
                     DateTime.Now));
+            }
             handled = true;
         }
         return IntPtr.Zero;
@@ -176,7 +185,8 @@ public sealed partial class ClipboardMonitorService : ObservableObject
     /// <summary>UI 线程：去重抑制 → 落库 → 通知。</summary>
     private void Commit(CaptureResult result)
     {
-        if (ShouldIgnore(result.Hash)) return;
+        if (IsPaused) return;
+        if (ShouldIgnore(result.Hash, result.Kind)) return;
 
         var id = result.Request.SourceId;
         var name = result.Request.SourceName;
@@ -190,18 +200,23 @@ public sealed partial class ClipboardMonitorService : ObservableObject
         if (captured is not null) Captured?.Invoke(captured);
     }
 
-    private bool ShouldIgnore(string hash)
+    private bool ShouldIgnore(string hash, ClipboardEntryKind kind)
     {
-        if (_ignoreHash is null) return false;
+        if (_ignoreHash is null && _ignoreKind is null) return false;
         if (DateTime.UtcNow > _suppressUntil)
         {
             _ignoreHash = null; // 只有过期才清空
+            _ignoreKind = null;
             return false;
         }
-        if (_ignoreHash != hash) return false;
+        if (_ignoreHash != hash && _ignoreKind != kind) return false;
         _ignoreHash = null;
+        _ignoreKind = null;
         return true;
     }
+
+    /// <summary>与采集端一致的文本哈希口径（同样按 MaxTextLength 截断）。</summary>
+    private string TextHash(string text) => ClipboardStore.TextHash(text, _settings.Settings.MaxTextLength);
 
     /// <summary>写入路径仍可能撞上别的进程占用剪贴板；重试 3×50ms。</summary>
     private static void WithWriteRetry(Action action)
