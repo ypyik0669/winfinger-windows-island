@@ -73,6 +73,7 @@ public sealed partial class AppViewModel : ObservableObject
     public HotkeyService Hotkeys { get; } = new();
     public PasteService Paste { get; }
     public OcrService Ocr { get; } = new();
+    public AiService Ai { get; }
 
     /// <summary>自动 OCR 串行队列（一次只跑一张图，避免 CPU 抖动）。</summary>
     private readonly SemaphoreSlim _autoOcrGate = new(1, 1);
@@ -88,6 +89,7 @@ public sealed partial class AppViewModel : ObservableObject
     {
         ClipboardMonitor = new ClipboardMonitorService(ClipboardStore, ForegroundApp, SettingsStore);
         Paste = new PasteService(ClipboardMonitor, ClipboardStore, FocusRestore, this, Notifications);
+        Ai = new AiService(SettingsStore);
 
         var settings = SettingsStore.Settings;
         ClipboardMonitor.IsPaused = settings.ClipboardPaused;
