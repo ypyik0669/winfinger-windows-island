@@ -42,6 +42,19 @@ public partial class App : Application
 
         CreateTrayIcon();
 
+        // dev hook: WINFINGER_AUTOEXPAND=<page index 1-5> expands to that page 2s after startup
+        if (int.TryParse(Environment.GetEnvironmentVariable("WINFINGER_AUTOEXPAND"), out int autoPage) && autoPage is >= 1 and <= 5)
+        {
+            var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+            t.Tick += (_, _) =>
+            {
+                t.Stop();
+                Model.SelectedPage = (AppPage)(autoPage - 1);
+                Model.IsExpanded = true;
+            };
+            t.Start();
+        }
+
         // repro hook: WINFINGER_PICKTEST=1 fires the tray 选择图片 flow 3s after startup
         if (Environment.GetEnvironmentVariable("WINFINGER_PICKTEST") == "1")
         {
@@ -80,8 +93,45 @@ public partial class App : Application
         var menu = new System.Windows.Controls.ContextMenu();
 
         var openItem = new System.Windows.Controls.MenuItem { Header = "打开 WinFinger" };
-        openItem.Click += (_, _) => Model.IsExpanded = true;
+        openItem.Click += (_, _) => Model.ToggleExpanded();
         menu.Items.Add(openItem);
+
+        // 外观: 纯黑 / Liquid Glass (mac MacFingerAppearance)
+        var appearanceMenu = new System.Windows.Controls.MenuItem { Header = "外观" };
+        var blackItem = new System.Windows.Controls.MenuItem { Header = "纯黑", IsCheckable = true };
+        var glassItem = new System.Windows.Controls.MenuItem { Header = "Liquid Glass", IsCheckable = true };
+        void SyncAppearance()
+        {
+            blackItem.IsChecked = Model.AppearanceStyle == "black";
+            glassItem.IsChecked = Model.AppearanceStyle != "black";
+        }
+        blackItem.Click += (_, _) => { Model.AppearanceStyle = "black"; SyncAppearance(); };
+        glassItem.Click += (_, _) => { Model.AppearanceStyle = "glass"; SyncAppearance(); };
+        appearanceMenu.Items.Add(blackItem);
+        appearanceMenu.Items.Add(glassItem);
+        appearanceMenu.Items.Add(new System.Windows.Controls.Separator());
+        var appearanceSettingsItem = new System.Windows.Controls.MenuItem { Header = "外观设置…" };
+        appearanceSettingsItem.Click += (_, _) => OpenAppearanceWindow();
+        appearanceMenu.Items.Add(appearanceSettingsItem);
+        menu.Items.Add(appearanceMenu);
+
+        // 收起位置: 顶部 / 悬浮 (mac MacFingerDockMode)
+        var dockMenu = new System.Windows.Controls.MenuItem { Header = "收起位置" };
+        var topItem = new System.Windows.Controls.MenuItem { Header = "顶部", IsCheckable = true };
+        var floatingItem = new System.Windows.Controls.MenuItem { Header = "悬浮", IsCheckable = true };
+        void SyncDock()
+        {
+            topItem.IsChecked = Model.DockMode == "top";
+            floatingItem.IsChecked = Model.DockMode == "floating";
+        }
+        topItem.Click += (_, _) => { Model.DockMode = "top"; SyncDock(); };
+        floatingItem.Click += (_, _) => { Model.DockMode = "floating"; SyncDock(); };
+        dockMenu.Items.Add(topItem);
+        dockMenu.Items.Add(floatingItem);
+        menu.Items.Add(dockMenu);
+        menu.Opened += (_, _) => { SyncAppearance(); SyncDock(); };
+        SyncAppearance();
+        SyncDock();
 
         var pauseItem = new System.Windows.Controls.MenuItem
         {
@@ -95,10 +145,6 @@ public partial class App : Application
         var clearItem = new System.Windows.Controls.MenuItem { Header = "清空剪贴板历史" };
         clearItem.Click += (_, _) => Model.ClipboardStore.Clear();
         menu.Items.Add(clearItem);
-
-        var appearanceItem = new System.Windows.Controls.MenuItem { Header = "外观设置…" };
-        appearanceItem.Click += (_, _) => OpenAppearanceWindow();
-        menu.Items.Add(appearanceItem);
 
         var bgMenu = new System.Windows.Controls.MenuItem { Header = "岛背景" };
         var bgGlass = new System.Windows.Controls.MenuItem { Header = "动态玻璃" };

@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Windows.Media.Effects;
 using System.Windows.Shapes;
 using WinFinger.Services;
 using WinFinger.ViewModels;
@@ -14,6 +15,7 @@ public partial class CompactIslandView : UserControl
 {
     private AppViewModel? _model;
     private Rectangle[] _bars = Array.Empty<Rectangle>();
+    private string _lastTitle = "";
 
     public CompactIslandView()
     {
@@ -28,8 +30,8 @@ public partial class CompactIslandView : UserControl
             new Binding(nameof(MetricsService.DownloadText)) { Source = model.Metrics });
         UploadLabel.SetBinding(TextBlock.TextProperty,
             new Binding(nameof(MetricsService.UploadText)) { Source = model.Metrics });
-        MemoryLabel.SetBinding(TextBlock.TextProperty,
-            new Binding(nameof(MetricsService.MemoryText)) { Source = model.Metrics });
+        Ring.SetBinding(Controls.MemoryRing.ValueProperty,
+            new Binding(nameof(MetricsService.MemoryUsedRatio)) { Source = model.Metrics });
 
         _bars = SpectrumPanel.Children.OfType<Rectangle>().ToArray();
         model.Visualizer.LevelsUpdated += OnLevelsUpdated;
@@ -45,7 +47,7 @@ public partial class CompactIslandView : UserControl
     {
         if (_model is null) return;
         bool show = hovering && _model.Media.HasSession && _model.Media.Title.Length > 0
-                    && PomodoroLabel.Visibility != Visibility.Visible;
+                    && PomodoroSlot.Visibility != Visibility.Visible;
         if (show)
         {
             HoverTitleLabel.Text = _model.Media.Title;
@@ -64,14 +66,25 @@ public partial class CompactIslandView : UserControl
     private void OnLevelsUpdated()
     {
         var visualizer = _model?.Visualizer;
-        if (visualizer is null) return;
+        if (visualizer is null || _model is null) return;
         bool running = visualizer.IsRunning;
-        SpectrumPanel.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
-        if (!running) return;
-        var brush = SpectrumBrush();
-        for (int i = 0; i < _bars.Length && i < AudioVisualizerService.BandCount; i++)
+        if (!running)
         {
-            _bars[i].Height = 3 + visualizer.Levels[i] * 13;
+            // mac paused bars: static "low" heights
+            double[] low = { 0.35, 0.72, 0.48, 0.82, 0.42 };
+            for (int i = 0; i < _bars.Length; i++) _bars[i].Height = 14 * low[i];
+            return;
+        }
+        var brush = SpectrumBrush();
+        // 8 FFT bands → 5 bars
+        int bands = AudioVisualizerService.BandCount;
+        for (int i = 0; i < _bars.Length; i++)
+        {
+            int from = i * bands / _bars.Length;
+            int to = Math.Max(from + 1, (i + 1) * bands / _bars.Length);
+            double level = 0;
+            for (int b = from; b < to && b < bands; b++) level = Math.Max(level, visualizer.Levels[b]);
+            _bars[i].Height = 3 + level * 11;
             _bars[i].Fill = brush;
         }
     }
@@ -79,18 +92,15 @@ public partial class CompactIslandView : UserControl
     private Brush SpectrumBrush()
     {
         var color = _model?.Media.AccentColor ?? Colors.White;
-        // keep bars readable even for dark accents
-        var brush = new SolidColorBrush(Color.FromRgb(
-            (byte)Math.Min(255, color.R + 40),
-            (byte)Math.Min(255, color.G + 40),
-            (byte)Math.Min(255, color.B + 40)));
+        var brush = new SolidColorBrush(Color.FromArgb(0xF2, color.R, color.G, color.B));
         brush.Freeze();
         return brush;
     }
 
     private void OnMediaChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(MediaService.Cover) or nameof(MediaService.HasSession) or nameof(MediaService.IsPlaying))
+        if (e.PropertyName is nameof(MediaService.Cover) or nameof(MediaService.HasSession)
+            or nameof(MediaService.IsPlaying) or nameof(MediaService.AccentColor) or nameof(MediaService.Title))
             RefreshMedia();
     }
 
@@ -98,13 +108,32 @@ public partial class CompactIslandView : UserControl
     {
         if (_model is null) return;
         var media = _model.Media;
-        bool showCover = media.HasSession && media.Cover is not null;
-        CoverSlot.Visibility = showCover ? Visibility.Visible : Visibility.Collapsed;
-        IdleDot.Visibility = showCover ? Visibility.Collapsed : Visibility.Visible;
-        if (showCover) CoverImage.Source = media.Cover;
+        bool show = media.HasSession && (media.Title.Length > 0 || media.Cover is not null)
+                    && _model.Pomodoro.Phase == PomodoroPhase.Idle;
+        MediaSlot.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        if (!show) return;
+
+        CoverImage.Source = media.Cover;
+        CoverGlow.Color = media.AccentColor;
+        CoverGlow.BeginAnimation(DropShadowEffect.BlurRadiusProperty,
+            new DoubleAnimation(media.IsPlaying ? 5 : 1, TimeSpan.FromMilliseconds(300)));
+        var brush = SpectrumBrush();
+        foreach (var bar in _bars) bar.Fill = brush;
+        if (!_model.Visualizer.IsRunning) OnLevelsUpdated();
+
+        // mac: fades on title change
+        if (media.Title != _lastTitle)
+        {
+            _lastTitle = media.Title;
+            MediaSlot.BeginAnimation(OpacityProperty, new DoubleAnimation(0.2, 1, TimeSpan.FromMilliseconds(200)));
+        }
     }
 
-    private void OnPomodoroChanged(object? sender, PropertyChangedEventArgs e) => RefreshPomodoro();
+    private void OnPomodoroChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        RefreshPomodoro();
+        if (e.PropertyName == nameof(PomodoroService.Phase)) RefreshMedia();
+    }
 
     private void RefreshPomodoro()
     {
@@ -112,10 +141,15 @@ public partial class CompactIslandView : UserControl
         var pomodoro = _model.Pomodoro;
         if (pomodoro.Phase == PomodoroPhase.Idle)
         {
-            PomodoroLabel.Visibility = Visibility.Collapsed;
+            PomodoroSlot.Visibility = Visibility.Collapsed;
             return;
         }
-        PomodoroLabel.Visibility = Visibility.Visible;
-        PomodoroLabel.Text = $"🍅 {pomodoro.RemainingText}";
+        PomodoroSlot.Visibility = Visibility.Visible;
+        bool rest = pomodoro.Phase == PomodoroPhase.Break;
+        PomodoroGlyph.Text = rest ? "\uE95A" : "\uE823";
+        string brush = rest ? "Brush.Teal" : "Brush.Warning";
+        PomodoroGlyph.SetResourceReference(TextBlock.ForegroundProperty, brush);
+        PomodoroLabel.SetResourceReference(TextBlock.ForegroundProperty, brush);
+        PomodoroLabel.Text = pomodoro.RemainingText;
     }
 }

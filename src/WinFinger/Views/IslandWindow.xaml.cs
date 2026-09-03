@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
+using System.Windows.Media;
 using System.Windows.Media.Animation;
 using WinFinger.Controls;
 using WinFinger.Interop;
@@ -15,14 +16,18 @@ public partial class IslandWindow : Window
     private const double CompactWidth = 300;
     private const double CompactHeight = 36;
     private const double CompactRadius = 18;
-    private const double ExpandedWidth = 720;
-    private const double ExpandedHeight = 480;
-    private const double ExpandedRadius = 28;
+    private const double ExpandedRadius = 24;               // mac: 24
+    private const double DesignWidth = 920;                 // mac NotchLayout.expandedDesignSize
+    private const double DesignHeight = 520;
+    private const double MinExpandedWidth = 560;            // mac minimumExpandedSize
+    private const double StageTopInset = 8;                 // IslandBorder top margin (shadow room)
+    private const double SnapToTopDistance = 16;            // mac finishDrag: distanceToTop <= 16
 
     private const double NotificationWidth = 430;
     private const double HoverWidth = 390;
 
     private readonly AppViewModel _model;
+    private readonly ScaleTransform ExpandedScale = new(1, 1); // mac scaleEffect on the design-size panel
     private IntPtr _hwnd;
     private IntPtr _mouseHook;
     private NativeMethods.LowLevelMouseProc? _mouseProc; // field: keeps delegate alive against GC
@@ -40,14 +45,22 @@ public partial class IslandWindow : Window
     private LiveGlassCapture? _glass;
     private System.Windows.Threading.DispatcherTimer? _glassTimer;
     private bool _morphing; // size animation in flight: skip captures so they don't fight for frames
+    private DateTime _lastDragCapture;
 
-    // horizontal drag reposition
+    // drag (compact bar or expanded header) → floating
     private bool _dragging;
     private bool _dragArmed;
     private System.Windows.Point _dragStartScreen;
     private double _dragStartLeft;
     private double _dragStartTop;
-    private double? _preExpandTop; // set when the window is shifted up to fit the expanded panel
+    private double? _preExpandTop;  // set when the window is shifted up to fit the expanded panel
+    private double? _preExpandLeft; // set when the window is shifted sideways to fit the expanded panel
+    private DateTime _lastCompactClick;
+
+    // corner resize (expanded)
+    private bool _resizing;
+    private FrameworkElement? _resizeHandle;
+    private double _resizeWidth;
 
     public IslandWindow(AppViewModel model)
     {
@@ -56,11 +69,14 @@ public partial class IslandWindow : Window
         DataContext = model;
         CompactView.Initialize(model);
         ExpandedView.Initialize(model);
+        ExpandedView.LayoutTransform = ExpandedScale;
+        ExpandedView.HeaderDragged += OnHeaderDragged;
 
         SourceInitialized += OnSourceInitialized;
         Loaded += (_, _) =>
         {
-            PositionAtTopCenter();
+            MigrateLegacyPosition();
+            ApplyDockPosition(animated: false);
             _model.ClipboardMonitor.Attach(this);
             _glass = new LiveGlassCapture();
             GlassBrush.ImageSource = _glass.Bitmap;
@@ -74,11 +90,13 @@ public partial class IslandWindow : Window
                 _model.SettingsStore.Settings.BackgroundMode == "glass")
                 _model.SettingsStore.Settings.BackgroundMode = "color";
             ApplyBackground();
+            UpdateExpandedScale();
         };
         PreviewKeyDown += OnPreviewKeyDown;
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
 
         model.PropertyChanged += OnModelPropertyChanged;
+        model.Theme.PaletteChanged += _ => Dispatcher.BeginInvoke(ApplyBackground);
 
         _notificationTimer = new System.Windows.Threading.DispatcherTimer
         {
@@ -119,6 +137,133 @@ public partial class IslandWindow : Window
             new IntPtr(-1), new IntPtr(-1));
     }
 
+    // ── Geometry helpers ──
+
+    private double DeviceScale => PresentationSource.FromVisual(this)?.CompositionTarget?.TransformToDevice.M11 ?? 1.0;
+
+    /// <summary>Largest expanded width allowed on the current monitor (mac expandedSize(in:)).</summary>
+    private double MaxExpandedWidth()
+    {
+        var monitor = MonitorRectDip(CurrentMonitor());
+        return Math.Min(DesignWidth, Math.Max(MinExpandedWidth, monitor.Width - 64));
+    }
+
+    /// <summary>Requested expanded size honouring the user's width, clamped and aspect-locked.</summary>
+    private (double width, double height) ExpandedSize()
+    {
+        double max = MaxExpandedWidth();
+        double width = max;
+        if (_model.ExpandedUserWidth > 0)
+            width = Math.Min(Math.Max(_model.ExpandedUserWidth, Math.Min(MinExpandedWidth, max)), max);
+        return (width, width * DesignHeight / DesignWidth);
+    }
+
+    private void UpdateExpandedScale()
+    {
+        var (width, _) = ExpandedSize();
+        double scale = width / DesignWidth;
+        ExpandedScale.ScaleX = scale;
+        ExpandedScale.ScaleY = scale;
+    }
+
+    private IntPtr CurrentMonitor()
+    {
+        var center = IslandCenterDevice();
+        return NativeMethods.MonitorFromPoint(new NativeMethods.POINT { X = (int)center.X, Y = (int)center.Y },
+            NativeMethods.MONITOR_DEFAULTTONEAREST);
+    }
+
+    private static IntPtr PrimaryMonitor() =>
+        NativeMethods.MonitorFromPoint(new NativeMethods.POINT { X = 0, Y = 0 }, NativeMethods.MONITOR_DEFAULTTONEAREST);
+
+    private Rect MonitorRectDip(IntPtr monitor)
+    {
+        var info = new NativeMethods.MONITORINFO { cbSize = System.Runtime.InteropServices.Marshal.SizeOf<NativeMethods.MONITORINFO>() };
+        if (monitor == IntPtr.Zero || !NativeMethods.GetMonitorInfo(monitor, ref info))
+            return new Rect(0, 0, SystemParameters.PrimaryScreenWidth, SystemParameters.PrimaryScreenHeight);
+        double s = DeviceScale;
+        var r = info.rcMonitor;
+        return new Rect(r.Left / s, r.Top / s, (r.Right - r.Left) / s, (r.Bottom - r.Top) / s);
+    }
+
+    private Rect VirtualScreenDip() => new(SystemParameters.VirtualScreenLeft, SystemParameters.VirtualScreenTop,
+        SystemParameters.VirtualScreenWidth, SystemParameters.VirtualScreenHeight);
+
+    private System.Windows.Point IslandCenterDevice()
+    {
+        try
+        {
+            return IslandBorder.PointToScreen(new Point(IslandBorder.ActualWidth / 2, IslandBorder.ActualHeight / 2));
+        }
+        catch
+        {
+            double s = DeviceScale;
+            return new Point((Left + Width / 2) * s, (Top + StageTopInset + CompactHeight / 2) * s);
+        }
+    }
+
+    /// <summary>Compact island rect in window-stage DIP coordinates: top-centred in the stage.</summary>
+    private Rect CompactRectDip() => new(Left + Width / 2 - CompactWidth / 2, Top + StageTopInset, CompactWidth, CompactHeight);
+
+    private bool IsFloating => _model.DockMode == "floating";
+
+    private void MigrateLegacyPosition()
+    {
+        var s = _model.SettingsStore.Settings;
+        if (!double.IsNaN(s.FloatingLeft) && !double.IsNaN(s.FloatingTop)) return;
+        // old free-drag offsets: a pill dragged away from the top edge becomes a floating island
+        if (s.IslandOffsetY > SnapToTopDistance)
+        {
+            s.FloatingLeft = (SystemParameters.PrimaryScreenWidth - Width) / 2 + s.IslandOffsetX;
+            s.FloatingTop = s.IslandOffsetY;
+            _model.DockMode = "floating";
+        }
+        else
+        {
+            s.FloatingLeft = (SystemParameters.PrimaryScreenWidth - Width) / 2;
+            s.FloatingTop = 0;
+        }
+        _model.SettingsStore.Save();
+    }
+
+    /// <summary>mac updateFrame: top → flush with the monitor's top edge, centred; floating → stored origin.</summary>
+    private void ApplyDockPosition(bool animated)
+    {
+        var s = _model.SettingsStore.Settings;
+        if (IsFloating)
+        {
+            double left = double.IsNaN(s.FloatingLeft) ? (SystemParameters.PrimaryScreenWidth - Width) / 2 : s.FloatingLeft;
+            double top = double.IsNaN(s.FloatingTop) ? 0 : s.FloatingTop;
+            if (double.IsNaN(s.FloatingTop) || (top <= 0 && !double.IsNaN(s.FloatingLeft) && s.FloatingTop == 0))
+            {
+                // mac defaultFloatingOrigin: upper-middle of the screen
+                var monitor = MonitorRectDip(PrimaryMonitor());
+                left = monitor.Left + monitor.Width / 2 - Width / 2;
+                top = monitor.Top + monitor.Height * 0.32 - StageTopInset;
+            }
+            Left = left;
+            Top = top;
+            ClampPosition();
+            IslandBorder.CornerRadius = new CornerRadius(_model.IsExpanded ? ExpandedRadius : CompactRadius);
+        }
+        else
+        {
+            // dock to the monitor holding the stored/last position
+            var probe = new NativeMethods.POINT
+            {
+                X = (int)((double.IsNaN(s.FloatingLeft) ? 0 : s.FloatingLeft + Width / 2) * DeviceScale),
+                Y = (int)((double.IsNaN(s.FloatingTop) ? 0 : s.FloatingTop + StageTopInset) * DeviceScale)
+            };
+            var monitor = MonitorRectDip(NativeMethods.MonitorFromPoint(probe, NativeMethods.MONITOR_DEFAULTTONEAREST));
+            Left = monitor.Left + monitor.Width / 2 - Width / 2;
+            Top = monitor.Top - StageTopInset;
+            if (!_model.IsExpanded)
+                IslandBorder.CornerRadius = new CornerRadius(2, 2, 14, 14); // mac: top corners meet the screen edge
+        }
+        IslandShadow.Opacity = IsFloating && !_model.IsExpanded ? 0.45 : 0.35;
+        CaptureGlass();
+    }
+
     /// <summary>Counter-phased opacity loops so light appears to drift around the glass rim.</summary>
     private void StartGlintBreathing()
     {
@@ -141,13 +286,47 @@ public partial class IslandWindow : Window
         GlintB.BeginAnimation(OpacityProperty, counter);
     }
 
+    /// <summary>mac BreathingBorder: accent-tinted stroke that pulses (1.6s) and drifts while expanded.</summary>
+    private void StartAccentBorder()
+    {
+        var accent = _model.Media.HasSession ? _model.Media.AccentColor
+            : (TryFindResource("Brush.Teal") as SolidColorBrush)?.Color ?? Colors.Teal;
+        AccentStop0.Color = Color.FromArgb(0x20, accent.R, accent.G, accent.B);
+        AccentStop1.Color = Color.FromArgb(0xE0, accent.R, accent.G, accent.B);
+        AccentStop2.Color = Color.FromArgb(0x70, accent.R, accent.G, accent.B);
+        AccentStop3.Color = Color.FromArgb(0x20, accent.R, accent.G, accent.B);
+        var pulse = new DoubleAnimation(0.5, 1.0, TimeSpan.FromSeconds(1.6))
+        {
+            AutoReverse = true,
+            RepeatBehavior = RepeatBehavior.Forever,
+            EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut }
+        };
+        var drift = new PointAnimation(new Point(0, 0), new Point(1, 1), TimeSpan.FromSeconds(6))
+        {
+            AutoReverse = true,
+            RepeatBehavior = RepeatBehavior.Forever,
+            EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut }
+        };
+        Timeline.SetDesiredFrameRate(pulse, 20);
+        Timeline.SetDesiredFrameRate(drift, 20);
+        AccentBorder.BeginAnimation(OpacityProperty, pulse);
+        AccentBorderBrush.BeginAnimation(LinearGradientBrush.StartPointProperty, drift);
+    }
+
+    private void StopAccentBorder()
+    {
+        AccentBorder.BeginAnimation(OpacityProperty, null);
+        AccentBorderBrush.BeginAnimation(LinearGradientBrush.StartPointProperty, null);
+        AccentBorder.Opacity = 0;
+    }
+
     // ── Ghost mode: far cursor → translucent + click-through, near cursor → solid ──
 
     private void UpdateGhostState()
     {
         if (_hwnd == IntPtr.Zero || !IslandBorder.IsLoaded) return;
 
-        if (_model.IsExpanded || _notificationShowing || _hovering || _dragging)
+        if (_model.IsExpanded || _notificationShowing || _hovering || _dragging || _resizing)
         {
             if (_ghosted) SetGhosted(false);
             return;
@@ -204,24 +383,32 @@ public partial class IslandWindow : Window
         }
     }
 
-    /// <summary>Applies the configured background mode: live glass, solid color, or custom image.</summary>
+    /// <summary>Applies the configured background: 纯黑 → solid, otherwise live glass / solid color / image.</summary>
     public void ApplyBackground()
     {
         if (_glassTimer is null) return;
         var s = _model.SettingsStore.Settings;
         _glassTimer.Stop();
 
+        if (_model.AppearanceStyle == "black")
+        {
+            // mac 纯黑: palette background (expanded) / black @0.96 (compact) — always dark
+            GlassLayer.Background = new SolidColorBrush(Color.FromRgb(0x05, 0x06, 0x07));
+            ApplyAppearance();
+            return;
+        }
+
         switch (s.BackgroundMode)
         {
             case "image" when TryLoadImage(s.BackgroundImagePath, out var img):
-                GlassLayer.Background = new System.Windows.Media.ImageBrush(img)
+                GlassLayer.Background = new ImageBrush(img)
                 {
-                    Stretch = System.Windows.Media.Stretch.UniformToFill
+                    Stretch = Stretch.UniformToFill
                 };
                 break;
             case "color":
             case "image": // image failed to load: fall back to the solid color
-                GlassLayer.Background = new System.Windows.Media.SolidColorBrush(ParseColor(s.BackgroundColor));
+                GlassLayer.Background = new SolidColorBrush(ParseColor(s.BackgroundColor));
                 break;
             default: // glass
                 GlassLayer.Background = GlassBrush;
@@ -240,9 +427,11 @@ public partial class IslandWindow : Window
         // 0.55 maps to the design-default brush alphas; beyond that, stack extra black on the dim layer
         double darkness = Math.Clamp(s.GlassDarkness, 0, 1);
         BodyTintLayer.Opacity = Math.Min(1, darkness / 0.55);
+        // light palette (mac Liquid Glass 浅色): the whole panel whitens regardless of what's behind
+        if (!_model.Theme.IsDark) BodyTintLayer.Opacity = Math.Max(BodyTintLayer.Opacity, 0.92);
         double extraDark = Math.Max(0, (darkness - 0.55) / 0.45) * 0.6;
-        double imageDim = s.BackgroundMode == "image" ? Math.Clamp(s.ImageDim, 0, 0.8) : 0;
-        ImageDimLayer.Opacity = Math.Min(0.9, imageDim + extraDark);
+        double imageDim = s.BackgroundMode == "image" && _model.AppearanceStyle != "black" ? Math.Clamp(s.ImageDim, 0, 0.8) : 0;
+        ImageDimLayer.Opacity = _model.Theme.IsDark ? Math.Min(0.9, imageDim + extraDark) : imageDim * 0.5;
         if (_glass is not null) _glass.Saturation = s.GlassSaturation;
         ChromaticLayer.Visibility = s.ChromaticEnabled ? Visibility.Visible : Visibility.Collapsed;
         bool glints = s.GlintEnabled;
@@ -276,15 +465,15 @@ public partial class IslandWindow : Window
         }
     }
 
-    private static System.Windows.Media.Color ParseColor(string hex)
+    private static Color ParseColor(string hex)
     {
         try
         {
-            return (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(hex);
+            return (Color)ColorConverter.ConvertFromString(hex);
         }
         catch
         {
-            return System.Windows.Media.Color.FromRgb(0x1A, 0x1A, 0x22);
+            return Color.FromRgb(0x1A, 0x1A, 0x22);
         }
     }
 
@@ -292,7 +481,7 @@ public partial class IslandWindow : Window
     private void CaptureGlass()
     {
         if (_glass is null || !IslandBorder.IsLoaded || _morphing) return;
-        if (_model.SettingsStore.Settings.BackgroundMode != "glass") return;
+        if (_model.AppearanceStyle == "black" || _model.SettingsStore.Settings.BackgroundMode != "glass") return;
         try
         {
             var topLeft = IslandBorder.PointToScreen(new Point(0, 0));
@@ -311,7 +500,10 @@ public partial class IslandWindow : Window
     private void OnMediaChangedForGlow(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(Services.MediaService.IsPlaying) or nameof(Services.MediaService.AccentColor))
+        {
             UpdateGlow();
+            if (_model.IsExpanded && !_model.IsDraggingPanel) StartAccentBorder();
+        }
     }
 
     private void UpdateGlow()
@@ -319,7 +511,7 @@ public partial class IslandWindow : Window
         if (_model.Media.IsPlaying)
         {
             // adaptive tint: bleed the album accent into the glass
-            TintBrush.BeginAnimation(System.Windows.Media.SolidColorBrush.ColorProperty,
+            TintBrush.BeginAnimation(SolidColorBrush.ColorProperty,
                 new ColorAnimation(_model.Media.AccentColor, TimeSpan.FromMilliseconds(600)));
             TintLayer.BeginAnimation(OpacityProperty, new DoubleAnimation(0.12, TimeSpan.FromMilliseconds(600)));
             IslandShadow.BeginAnimation(System.Windows.Media.Effects.DropShadowEffect.ColorProperty,
@@ -337,34 +529,94 @@ public partial class IslandWindow : Window
         {
             TintLayer.BeginAnimation(OpacityProperty, new DoubleAnimation(0, TimeSpan.FromMilliseconds(600)));
             IslandShadow.BeginAnimation(System.Windows.Media.Effects.DropShadowEffect.ColorProperty,
-                new ColorAnimation(System.Windows.Media.Colors.Black, TimeSpan.FromMilliseconds(600)));
+                new ColorAnimation(Colors.Black, TimeSpan.FromMilliseconds(600)));
             IslandShadow.BeginAnimation(System.Windows.Media.Effects.DropShadowEffect.OpacityProperty,
                 new DoubleAnimation(0.35, TimeSpan.FromMilliseconds(600)));
         }
     }
 
+    // ── Drag (compact bar): moves the island, becomes floating, snaps back to the top edge ──
+
     private void OnIslandMouseMove(object sender, MouseEventArgs e)
     {
-        var position = e.GetPosition(IslandBorder);
+        if (!_dragArmed || e.LeftButton != MouseButtonState.Pressed) return;
+        var screen = IslandBorder.PointToScreen(e.GetPosition(IslandBorder));
+        ContinueDrag(new Point(screen.X - _dragStartScreen.X, screen.Y - _dragStartScreen.Y));
+    }
 
-        // free drag: the island floats anywhere on screen
-        if (_dragArmed && e.LeftButton == MouseButtonState.Pressed)
+    private void BeginDrag(System.Windows.Point screenPoint)
+    {
+        _dragArmed = true;
+        _dragging = false;
+        _dragStartScreen = screenPoint;
+        _dragStartLeft = Left;
+        _dragStartTop = Top;
+    }
+
+    private void ContinueDrag(System.Windows.Point deltaDevice)
+    {
+        if (!_dragging && (Math.Abs(deltaDevice.X) > 4 || Math.Abs(deltaDevice.Y) > 4))
         {
-            var screen = IslandBorder.PointToScreen(position);
-            double deltaX = screen.X - _dragStartScreen.X;
-            double deltaY = screen.Y - _dragStartScreen.Y;
-            if (!_dragging && (Math.Abs(deltaX) > 4 || Math.Abs(deltaY) > 4)) _dragging = true;
-            if (_dragging)
-            {
-                // PointToScreen returns device px; convert delta to DIP
-                var source = PresentationSource.FromVisual(this);
-                double scale = source?.CompositionTarget?.TransformToDevice.M11 ?? 1.0;
-                Left = _dragStartLeft + deltaX / scale;
-                Top = _dragStartTop + deltaY / scale;
-                ClampPosition();
-                CaptureGlass();
-            }
+            _dragging = true;
+            _model.IsDraggingPanel = true;
+            // mac beginFloating: the island detaches as soon as a drag starts
+            if (!IsFloating) _model.DockMode = "floating";
+            IslandBorder.CornerRadius = new CornerRadius(_model.IsExpanded ? ExpandedRadius : CompactRadius);
+            StopAccentBorder();
         }
+        if (!_dragging) return;
+        double scale = DeviceScale;
+        Left = _dragStartLeft + deltaDevice.X / scale;
+        Top = _dragStartTop + deltaDevice.Y / scale;
+        ClampPosition();
+        // lightweight glass while dragging: at most ~15 captures/s
+        if ((DateTime.UtcNow - _lastDragCapture).TotalMilliseconds > 66)
+        {
+            _lastDragCapture = DateTime.UtcNow;
+            CaptureGlass();
+        }
+    }
+
+    /// <summary>mac finishDrag: snap to the drop monitor's top edge when within 16 DIP, else persist floating.</summary>
+    private void FinishDrag()
+    {
+        _dragArmed = false;
+        if (!_dragging) return;
+        _dragging = false;
+        _model.IsDraggingPanel = false;
+
+        var s = _model.SettingsStore.Settings;
+        var monitor = MonitorRectDip(CurrentMonitor());
+        double islandTop = Top + StageTopInset;
+        if (islandTop - monitor.Top <= SnapToTopDistance)
+        {
+            s.FloatingLeft = monitor.Left + monitor.Width / 2 - Width / 2;
+            s.FloatingTop = monitor.Top;
+            _model.SettingsStore.Save();
+            _model.DockMode = "top"; // triggers ApplyDockPosition
+            if (_model.DockMode == "top") ApplyDockPosition(animated: true);
+        }
+        else
+        {
+            s.FloatingLeft = Left;
+            s.FloatingTop = Top;
+            _model.SettingsStore.Save();
+        }
+        if (_model.IsExpanded) StartAccentBorder();
+        CaptureGlass();
+    }
+
+    private void OnHeaderDragged(System.Windows.Point deltaDevice, bool ended)
+    {
+        if (!_dragArmed)
+        {
+            // first callback: anchor at the current pointer position minus the delta already travelled
+            var now = new Point(0, 0);
+            if (NativeMethods.GetCursorPos(out var cursor)) now = new Point(cursor.X, cursor.Y);
+            BeginDrag(new Point(now.X - deltaDevice.X, now.Y - deltaDevice.Y));
+        }
+        ContinueDrag(deltaDevice);
+        if (ended) FinishDrag();
     }
 
     /// <summary>Sweeps a diagonal sheen band across the island (liquid glass "reacts" moment).</summary>
@@ -372,7 +624,7 @@ public partial class IslandWindow : Window
     {
         double travel = IslandBorder.ActualWidth + 300;
         SheenBand.Opacity = 1;
-        SheenTranslate.BeginAnimation(System.Windows.Media.TranslateTransform.XProperty,
+        SheenTranslate.BeginAnimation(TranslateTransform.XProperty,
             new DoubleAnimation(-220, travel, TimeSpan.FromMilliseconds(700))
             {
                 EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut }
@@ -385,9 +637,9 @@ public partial class IslandWindow : Window
 
     private void OnIslandMouseEnter(object sender, MouseEventArgs e)
     {
-        if (_model.IsExpanded || _notificationShowing || _hovering) return;
+        if (_model.IsExpanded || _notificationShowing || _hovering || _dragging) return;
         _hovering = true;
-        AnimateIsland(toWidth: HoverWidth, toHeight: CompactHeight + 6, toRadius: (CompactHeight + 6) / 2,
+        AnimateIsland(toWidth: HoverWidth, toHeight: CompactHeight + 6, toRadius: CompactCornerRadius(CompactHeight + 6),
             duration: TimeSpan.FromMilliseconds(220),
             easing: new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.5 });
         CompactView.SetHoverState(true);
@@ -399,10 +651,14 @@ public partial class IslandWindow : Window
         _hovering = false;
         CompactView.SetHoverState(false);
         if (_model.IsExpanded || _notificationShowing) return; // another state took over
-        AnimateIsland(toWidth: CompactWidth, toHeight: CompactHeight, toRadius: CompactRadius,
+        AnimateIsland(toWidth: CompactWidth, toHeight: CompactHeight, toRadius: CompactCornerRadius(CompactHeight),
             duration: TimeSpan.FromMilliseconds(180),
             easing: new CubicEase { EasingMode = EasingMode.EaseOut });
     }
+
+    /// <summary>Docked: flat top corners meeting the screen edge; floating: full capsule.</summary>
+    private CornerRadius CompactCornerRadius(double height) =>
+        IsFloating ? new CornerRadius(height / 2) : new CornerRadius(2, 2, Math.Min(14, height / 2), Math.Min(14, height / 2));
 
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
@@ -411,7 +667,9 @@ public partial class IslandWindow : Window
         NativeMethods.SetWindowLong(_hwnd, NativeMethods.GWL_EXSTYLE,
             style | NativeMethods.WS_EX_TOOLWINDOW | NativeMethods.WS_EX_NOACTIVATE);
         // keep the island out of screen captures so the live glass never captures itself
-        NativeMethods.SetWindowDisplayAffinity(_hwnd, NativeMethods.WDA_EXCLUDEFROMCAPTURE);
+        // (dev hook: WINFINGER_CAPTURABLE=1 keeps it visible to screenshots for UI checks)
+        if (Environment.GetEnvironmentVariable("WINFINGER_CAPTURABLE") != "1")
+            NativeMethods.SetWindowDisplayAffinity(_hwnd, NativeMethods.WDA_EXCLUDEFROMCAPTURE);
     }
 
     protected override void OnClosed(EventArgs e)
@@ -425,39 +683,31 @@ public partial class IslandWindow : Window
     }
 
     private void OnDisplaySettingsChanged(object? sender, EventArgs e) =>
-        Dispatcher.BeginInvoke(PositionAtTopCenter);
-
-    private void PositionAtTopCenter()
-    {
-        Left = CenteredLeft() + _model.SettingsStore.Settings.IslandOffsetX;
-        Top = _model.SettingsStore.Settings.IslandOffsetY;
-        ClampPosition();
-    }
-
-    private double CenteredLeft() => (SystemParameters.PrimaryScreenWidth - Width) / 2;
+        Dispatcher.BeginInvoke(() =>
+        {
+            UpdateExpandedScale();
+            ApplyDockPosition(animated: false);
+        });
 
     private void ClampPosition()
     {
-        // keep the visible island (top-centered inside the stage window) on screen
+        // keep the visible island (top-centred inside the stage window) on the displays
+        var bounds = IsFloating ? VirtualScreenDip() : MonitorRectDip(CurrentMonitor());
         double islandHalf = Math.Max(IslandBorder.ActualWidth, CompactWidth) / 2;
-        double minX = 8 - (Width / 2 - islandHalf);
-        double maxX = SystemParameters.PrimaryScreenWidth - 8 - (Width / 2 + islandHalf);
-        Left = Math.Clamp(Left, minX, maxX);
-        // island sits 8 DIP below the stage top; keep the compact pill fully visible
-        double maxY = SystemParameters.PrimaryScreenHeight - CompactHeight - 16;
-        Top = Math.Clamp(Top, -8, maxY);
+        double minX = bounds.Left + 8 - (Width / 2 - islandHalf);
+        double maxX = bounds.Right - 8 - (Width / 2 + islandHalf);
+        Left = Math.Clamp(Left, minX, Math.Max(minX, maxX));
+        double minY = bounds.Top - StageTopInset;
+        double maxY = bounds.Bottom - CompactHeight - 16;
+        Top = Math.Clamp(Top, minY, Math.Max(minY, maxY));
     }
 
-    // ── Click vs horizontal drag ──
+    // ── Click vs drag (compact) ──
 
     private void OnIslandMouseDown(object sender, MouseButtonEventArgs e)
     {
         if (_model.IsExpanded) return;
-        _dragArmed = true;
-        _dragging = false;
-        _dragStartScreen = IslandBorder.PointToScreen(e.GetPosition(IslandBorder));
-        _dragStartLeft = Left;
-        _dragStartTop = Top;
+        BeginDrag(IslandBorder.PointToScreen(e.GetPosition(IslandBorder)));
         IslandBorder.CaptureMouse();
     }
 
@@ -465,19 +715,17 @@ public partial class IslandWindow : Window
     {
         if (_dragArmed)
         {
-            _dragArmed = false;
+            bool dragged = _dragging;
             IslandBorder.ReleaseMouseCapture();
-            if (_dragging)
-            {
-                _dragging = false;
-                _model.SettingsStore.Settings.IslandOffsetX = Left - CenteredLeft();
-                _model.SettingsStore.Settings.IslandOffsetY = Top;
-                _model.SettingsStore.Save();
-                return; // a drag is not a click
-            }
+            FinishDrag();
+            if (dragged) return; // a drag is not a click
         }
-        if (!_model.IsExpanded)
-            _model.IsExpanded = true;
+        if (_model.IsExpanded) return;
+        // mac openFromCompactClick: 120 ms debounce
+        var now = DateTime.UtcNow;
+        if ((now - _lastCompactClick).TotalMilliseconds < 120) return;
+        _lastCompactClick = now;
+        _model.IsExpanded = true;
     }
 
     private void OnPreviewKeyDown(object sender, KeyEventArgs e)
@@ -506,26 +754,42 @@ public partial class IslandWindow : Window
             {
                 _model.SelectedPage = p;
                 e.Handled = true;
+                return;
+            }
+            // mac ⌘N on the notes page
+            if (e.Key == Key.N && _model.SelectedPage == AppPage.Notes)
+            {
+                _model.RequestNewNote();
+                e.Handled = true;
             }
         }
     }
 
     private void OnModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(AppViewModel.IsExpanded))
+        switch (e.PropertyName)
         {
-            if (_model.IsExpanded) Expand();
-            else Collapse();
+            case nameof(AppViewModel.IsExpanded):
+                if (_model.IsExpanded) Expand();
+                else Collapse();
+                break;
+            case nameof(AppViewModel.DockMode):
+                if (!_dragging) ApplyDockPosition(animated: true);
+                break;
+            case nameof(AppViewModel.AppearanceStyle):
+                ApplyBackground();
+                break;
+            case nameof(AppViewModel.ExpandedUserWidth):
+                UpdateExpandedScale();
+                break;
         }
     }
-
-    // ── Expand / collapse choreography ──
 
     // ── Notification bulge (compact-state only) ──
 
     private void OnNotificationPosted(Services.IslandNotification notification)
     {
-        if (_model.IsExpanded) return;
+        if (_model.IsExpanded || _dragging) return;
         if (_hovering)
         {
             _hovering = false;
@@ -538,7 +802,7 @@ public partial class IslandWindow : Window
         if (_notificationShowing) return;
         _notificationShowing = true;
 
-        AnimateIsland(toWidth: NotificationWidth, toHeight: CompactHeight, toRadius: CompactRadius,
+        AnimateIsland(toWidth: NotificationWidth, toHeight: CompactHeight, toRadius: CompactCornerRadius(CompactHeight),
             duration: TimeSpan.FromMilliseconds(240),
             easing: new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.4 });
 
@@ -557,7 +821,7 @@ public partial class IslandWindow : Window
         _notificationShowing = false;
         if (_model.IsExpanded) return; // expand animation already took over
 
-        AnimateIsland(toWidth: CompactWidth, toHeight: CompactHeight, toRadius: CompactRadius,
+        AnimateIsland(toWidth: CompactWidth, toHeight: CompactHeight, toRadius: CompactCornerRadius(CompactHeight),
             duration: TimeSpan.FromMilliseconds(200),
             easing: new CubicEase { EasingMode = EasingMode.EaseInOut });
 
@@ -567,6 +831,8 @@ public partial class IslandWindow : Window
         CompactView.BeginAnimation(OpacityProperty,
             new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(140)) { BeginTime = TimeSpan.FromMilliseconds(100) });
     }
+
+    // ── Expand / collapse choreography ──
 
     private void Expand()
     {
@@ -586,15 +852,28 @@ public partial class IslandWindow : Window
         Activate();
         Focus();
 
-        // dragged low on screen: shift up so the expanded panel fits, restore on collapse
-        double needed = 8 + ExpandedHeight + 12;
-        if (Top + needed > SystemParameters.PrimaryScreenHeight)
+        UpdateExpandedScale();
+        var (width, height) = ExpandedSize();
+
+        // mac clampedOrigin: keep the expanded frame on the display — shift the stage and restore on collapse
+        var monitor = MonitorRectDip(CurrentMonitor());
+        double needed = StageTopInset + height + 12;
+        if (Top + needed > monitor.Bottom)
         {
             _preExpandTop = Top;
-            Top = SystemParameters.PrimaryScreenHeight - needed;
+            Top = Math.Max(monitor.Top - StageTopInset, monitor.Bottom - needed);
+        }
+        double islandLeft = Left + Width / 2 - width / 2;
+        double islandRight = islandLeft + width;
+        if (islandLeft < monitor.Left + 8 || islandRight > monitor.Right - 8)
+        {
+            _preExpandLeft = Left;
+            double target = islandLeft < monitor.Left + 8 ? monitor.Left + 8 : monitor.Right - 8 - width;
+            target = Math.Max(monitor.Left + 8, Math.Min(target, monitor.Right - 8 - width));
+            Left = target - (Width / 2 - width / 2);
         }
 
-        AnimateIsland(toWidth: ExpandedWidth, toHeight: ExpandedHeight, toRadius: ExpandedRadius,
+        AnimateIsland(toWidth: width, toHeight: height, toRadius: new CornerRadius(ExpandedRadius),
             duration: TimeSpan.FromMilliseconds(280),
             easing: new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.32 });
 
@@ -609,6 +888,10 @@ public partial class IslandWindow : Window
         };
         ExpandedView.BeginAnimation(OpacityProperty, fadeIn);
         PlaySheen();
+        ResizeLeft.Visibility = Visibility.Visible;
+        ResizeRight.Visibility = Visibility.Visible;
+        StartAccentBorder();
+        IslandShadow.Opacity = 0.35;
 
         InstallMouseHook();
     }
@@ -617,10 +900,18 @@ public partial class IslandWindow : Window
     {
         RemoveMouseHook();
         SetNoActivate(true);
+        ResizeLeft.Visibility = Visibility.Collapsed;
+        ResizeRight.Visibility = Visibility.Collapsed;
+        StopAccentBorder();
         if (_preExpandTop is { } restore)
         {
             _preExpandTop = null;
             Top = restore;
+        }
+        if (_preExpandLeft is { } restoreLeft)
+        {
+            _preExpandLeft = null;
+            Left = restoreLeft;
         }
 
         // release the expanded panel's garbage once the animation settles
@@ -628,7 +919,7 @@ public partial class IslandWindow : Window
         t.Tick += (_, _) => { t.Stop(); TrimWorkingSet(); };
         t.Start();
 
-        AnimateIsland(toWidth: CompactWidth, toHeight: CompactHeight, toRadius: CompactRadius,
+        AnimateIsland(toWidth: CompactWidth, toHeight: CompactHeight, toRadius: CompactCornerRadius(CompactHeight),
             duration: TimeSpan.FromMilliseconds(180),
             easing: new CubicEase { EasingMode = EasingMode.EaseIn });
 
@@ -641,9 +932,10 @@ public partial class IslandWindow : Window
             EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
         };
         CompactView.BeginAnimation(OpacityProperty, fadeIn);
+        IslandShadow.Opacity = IsFloating ? 0.45 : 0.35;
     }
 
-    private void AnimateIsland(double toWidth, double toHeight, double toRadius, TimeSpan duration, IEasingFunction easing)
+    private void AnimateIsland(double toWidth, double toHeight, CornerRadius toRadius, TimeSpan duration, IEasingFunction easing)
     {
         _morphing = true;
         var widthAnim = new DoubleAnimation(toWidth, duration) { EasingFunction = easing };
@@ -656,13 +948,62 @@ public partial class IslandWindow : Window
         var radiusAnim = new CornerRadiusAnimation
         {
             From = IslandBorder.CornerRadius,
-            To = new CornerRadius(toRadius),
+            To = toRadius,
             Duration = duration,
             EasingFunction = easing
         };
         IslandBorder.BeginAnimation(WidthProperty, widthAnim);
         IslandBorder.BeginAnimation(HeightProperty, heightAnim);
         IslandBorder.BeginAnimation(System.Windows.Controls.Border.CornerRadiusProperty, radiusAnim);
+    }
+
+    // ── Corner resize (mac handlePanelResize): aspect-locked, 560…max, persisted ──
+
+    private void OnResizeDown(object sender, MouseButtonEventArgs e)
+    {
+        if (!_model.IsExpanded) return;
+        _resizing = true;
+        _resizeHandle = (FrameworkElement)sender;
+        _resizeWidth = IslandBorder.ActualWidth;
+        // detach running size animations so direct sets take effect
+        IslandBorder.BeginAnimation(WidthProperty, null);
+        IslandBorder.BeginAnimation(HeightProperty, null);
+        IslandBorder.Width = IslandBorder.ActualWidth;
+        IslandBorder.Height = IslandBorder.ActualHeight;
+        _resizeHandle.CaptureMouse();
+        e.Handled = true;
+    }
+
+    private void OnResizeMove(object sender, MouseEventArgs e)
+    {
+        if (!_resizing || e.LeftButton != MouseButtonState.Pressed) return;
+        var p = e.GetPosition(IslandBorder); // island-local DIP; island is top-centred
+        double centerX = IslandBorder.ActualWidth / 2;
+        double proposedWidth = Math.Abs(p.X - centerX) * 2;
+        double proposedHeight = p.Y;
+        double ratio = DesignWidth / DesignHeight;
+        double width = Math.Max(proposedWidth, proposedHeight * ratio);
+        double max = MaxExpandedWidth();
+        width = Math.Min(Math.Max(width, Math.Min(MinExpandedWidth, max)), max);
+        double height = width / ratio;
+        _resizeWidth = width;
+        IslandBorder.Width = width;
+        IslandBorder.Height = height;
+        double scale = width / DesignWidth;
+        ExpandedScale.ScaleX = scale;
+        ExpandedScale.ScaleY = scale;
+        e.Handled = true;
+    }
+
+    private void OnResizeUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!_resizing) return;
+        _resizing = false;
+        _resizeHandle?.ReleaseMouseCapture();
+        _resizeHandle = null;
+        _model.ExpandedUserWidth = Math.Round(_resizeWidth);
+        CaptureGlass();
+        e.Handled = true;
     }
 
     private static void FadeTo(UIElement element, double to, TimeSpan duration, Action? completed = null)
@@ -711,7 +1052,7 @@ public partial class IslandWindow : Window
                 var screenPoint = new Point(data.pt.X, data.pt.Y);
                 Dispatcher.BeginInvoke(() =>
                 {
-                    if (!_model.IsExpanded) return;
+                    if (!_model.IsExpanded || _model.IsExpandedPinned || _resizing) return; // mac: pinned panels stay open
                     // PointToScreen yields device pixels — same space as the hook's point.
                     var topLeft = IslandBorder.PointToScreen(new Point(0, 0));
                     var bottomRight = IslandBorder.PointToScreen(new Point(IslandBorder.ActualWidth, IslandBorder.ActualHeight));

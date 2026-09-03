@@ -1,39 +1,69 @@
 <UserControl x:Class="WinFinger.Views.Pages.PomodoroPage"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="clr-namespace:WinFinger.Controls">
+    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Margin="20">
 
-        <TextBlock x:Name="PhaseLabel" Style="{StaticResource Text.Secondary}"
-                   HorizontalAlignment="Center" Text="准备专注"/>
+        <!-- 230 ring with labels inside (mac PomodoroView) -->
+        <Grid Width="230" Height="230">
+            <controls:ProgressRing x:Name="Ring" Thickness="10" TrackBrush="{DynamicResource Brush.Hairline}"
+                                   ProgressBrush="{DynamicResource Brush.Warning}">
+                <controls:ProgressRing.Effect>
+                    <DropShadowEffect x:Name="RingGlow" Color="#FFBA59" BlurRadius="28" ShadowDepth="0" Opacity="0"/>
+                </controls:ProgressRing.Effect>
+            </controls:ProgressRing>
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                <TextBlock x:Name="PhaseLabel" FontSize="13" FontWeight="SemiBold" FontFamily="{StaticResource Font.Text}"
+                           Foreground="{DynamicResource Brush.TextSecondary}" HorizontalAlignment="Center" Text="准备专注"/>
+                <TextBlock x:Name="TimeLabel" FontFamily="{StaticResource Font.Mono}" FontSize="54" FontWeight="Light"
+                           Foreground="{DynamicResource Brush.TextPrimary}" HorizontalAlignment="Center" Margin="0,2,0,0" Text="25:00"/>
+                <TextBlock x:Name="SubtitleLabel" FontSize="11" FontFamily="{StaticResource Font.Text}"
+                           Foreground="{DynamicResource Brush.TextSecondary}" HorizontalAlignment="Center" Text="一次只做好一件事"/>
+            </StackPanel>
+        </Grid>
 
-        <TextBlock x:Name="TimeLabel" FontFamily="{StaticResource Font.Display}" FontSize="64" FontWeight="Light"
-                   Foreground="{StaticResource Brush.TextPrimary}" HorizontalAlignment="Center"
-                   Margin="0,4,0,0" Text="25:00"/>
-
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,16,0,0">
-            <Button x:Name="StartButton" Style="{StaticResource Button.Ghost}" Padding="18,9">
-                <TextBlock x:Name="StartLabel" FontSize="13" FontWeight="SemiBold"
-                           Foreground="{StaticResource Brush.Green}" Text="开始专注"/>
+        <!-- primary + reset -->
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,22,0,0">
+            <Button x:Name="StartButton" Style="{StaticResource Button.Primary}" Width="112" Background="{DynamicResource Brush.Warning}">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock x:Name="StartGlyph" FontFamily="{StaticResource Font.Icon}" FontSize="10" Text="&#xE768;" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="StartLabel" Margin="6,0,0,0" VerticalAlignment="Center" Text="开始专注"/>
+                </StackPanel>
             </Button>
-            <Button x:Name="ResetButton" Style="{StaticResource Button.Ghost}" Content="重置" FontSize="13" Margin="8,0,0,0" Padding="18,9"/>
+            <Button x:Name="ResetButton" Style="{StaticResource Button.Secondary}" Width="84" Height="38" Margin="12,0,0,0">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock FontFamily="{StaticResource Font.Icon}" FontSize="10" Text="&#xE72C;" VerticalAlignment="Center"/>
+                    <TextBlock Text="重置" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Button>
         </StackPanel>
 
-        <!-- duration settings -->
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,26,0,0">
-            <TextBlock Style="{StaticResource Text.Micro}" VerticalAlignment="Center" Text="专注"/>
-            <Button x:Name="FocusMinus" Style="{StaticResource Button.Ghost}" Content="−" Margin="6,0,0,0" Padding="8,3"/>
-            <TextBlock x:Name="FocusLabel" Style="{StaticResource Text.Body}" VerticalAlignment="Center"
-                       MinWidth="46" TextAlignment="Center" Text="25 分钟"/>
-            <Button x:Name="FocusPlus" Style="{StaticResource Button.Ghost}" Content="＋" Padding="8,3"/>
-
-            <TextBlock Style="{StaticResource Text.Micro}" VerticalAlignment="Center" Margin="18,0,0,0" Text="休息"/>
-            <Button x:Name="BreakMinus" Style="{StaticResource Button.Ghost}" Content="−" Margin="6,0,0,0" Padding="8,3"/>
-            <TextBlock x:Name="BreakLabel" Style="{StaticResource Text.Body}" VerticalAlignment="Center"
-                       MinWidth="40" TextAlignment="Center" Text="5 分钟"/>
-            <Button x:Name="BreakPlus" Style="{StaticResource Button.Ghost}" Content="＋" Padding="8,3"/>
+        <!-- steppers -->
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,22,0,0">
+            <Border Background="{DynamicResource Brush.Fill}" CornerRadius="17" Height="34" Padding="10,0">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock FontSize="11" FontWeight="SemiBold" FontFamily="{StaticResource Font.Text}"
+                               Foreground="{DynamicResource Brush.TextSecondary}" VerticalAlignment="Center" Text="专注"/>
+                    <Button x:Name="FocusMinus" Style="{StaticResource Button.Icon}" Width="24" Height="24" Content="&#xE738;" FontSize="10" Margin="8,0,0,0"/>
+                    <TextBlock x:Name="FocusLabel" FontSize="11" FontWeight="SemiBold" FontFamily="{StaticResource Font.Mono}"
+                               Foreground="{DynamicResource Brush.TextPrimary}" VerticalAlignment="Center" Width="62" TextAlignment="Center" Text="25 分钟"/>
+                    <Button x:Name="FocusPlus" Style="{StaticResource Button.Icon}" Width="24" Height="24" Content="&#xE710;" FontSize="10"/>
+                </StackPanel>
+            </Border>
+            <Border Background="{DynamicResource Brush.Fill}" CornerRadius="17" Height="34" Padding="10,0" Margin="24,0,0,0">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock FontSize="11" FontWeight="SemiBold" FontFamily="{StaticResource Font.Text}"
+                               Foreground="{DynamicResource Brush.TextSecondary}" VerticalAlignment="Center" Text="休息"/>
+                    <Button x:Name="BreakMinus" Style="{StaticResource Button.Icon}" Width="24" Height="24" Content="&#xE738;" FontSize="10" Margin="8,0,0,0"/>
+                    <TextBlock x:Name="BreakLabel" FontSize="11" FontWeight="SemiBold" FontFamily="{StaticResource Font.Mono}"
+                               Foreground="{DynamicResource Brush.TextPrimary}" VerticalAlignment="Center" Width="62" TextAlignment="Center" Text="5 分钟"/>
+                    <Button x:Name="BreakPlus" Style="{StaticResource Button.Icon}" Width="24" Height="24" Content="&#xE710;" FontSize="10"/>
+                </StackPanel>
+            </Border>
         </StackPanel>
 
-        <TextBlock x:Name="StatsLabel" Style="{StaticResource Text.Micro}" Foreground="{StaticResource Brush.TextTertiary}"
-                   HorizontalAlignment="Center" Margin="0,14,0,0" Text=""/>
+        <TextBlock x:Name="StatsLabel" FontSize="10" FontWeight="Medium" FontFamily="{StaticResource Font.Text}"
+                   Foreground="{DynamicResource Brush.TextSecondary}" HorizontalAlignment="Center" Margin="0,14,0,0"
+                   Text="完成第一个番茄后会在这里累计"/>
     </StackPanel>
 </UserControl>

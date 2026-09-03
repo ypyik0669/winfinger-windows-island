@@ -22,7 +22,7 @@
                 Width="300" Height="36"
                 CornerRadius="18"
                 Background="#01000000"
-                BorderBrush="{StaticResource Brush.GlassRim}"
+                BorderBrush="{DynamicResource Brush.GlassRim}"
                 BorderThickness="1.2"
                 Cursor="Hand"
                 MouseLeftButtonDown="OnIslandMouseDown"
@@ -50,7 +50,7 @@
 
                 <!-- smoked glass body tint (opacity = user's 玻璃暗度) -->
                 <Border x:Name="BodyTintLayer" IsHitTestVisible="False" Opacity="1"
-                        Background="{StaticResource Brush.IslandBody}"
+                        Background="{DynamicResource Brush.IslandBody}"
                         CornerRadius="{Binding CornerRadius, ElementName=IslandBorder}"/>
 
                 <!-- adaptive tint: album accent bleeds into the glass while music plays -->
@@ -62,12 +62,14 @@
                 </Border>
 
                 <!-- curved top reflection: scales with the island, fades out by ~45% height -->
-                <Border Background="{StaticResource Brush.TopSheen}"
+                <Border Background="{DynamicResource Brush.TopSheen}"
                         CornerRadius="{Binding CornerRadius, ElementName=IslandBorder}" IsHitTestVisible="False"/>
 
                 <views:CompactIslandView x:Name="CompactView"/>
 
-                <views:ExpandedPanelView x:Name="ExpandedView" Opacity="0" Visibility="Collapsed"/>
+                <!-- expanded panel laid out at the mac design size and scaled to the island -->
+                <views:ExpandedPanelView x:Name="ExpandedView" Opacity="0" Visibility="Collapsed"
+                                         Width="920" Height="520" HorizontalAlignment="Center" VerticalAlignment="Top"/>
 
                 <!-- transient notification bulge -->
                 <Grid x:Name="NotificationView" Opacity="0" Visibility="Collapsed">
@@ -80,22 +82,36 @@
                 </Grid>
 
                 <!-- inner dark edge: glass thickness -->
-                <Border Margin="1" BorderThickness="1" BorderBrush="{StaticResource Brush.GlassInnerEdge}"
+                <Border Margin="1" BorderThickness="1" BorderBrush="{DynamicResource Brush.GlassInnerEdge}"
                         CornerRadius="{Binding CornerRadius, ElementName=IslandBorder}" IsHitTestVisible="False"/>
 
                 <!-- chromatic dispersion along the bevel -->
-                <Border x:Name="ChromaticLayer" Margin="1.4" BorderThickness="1" BorderBrush="{StaticResource Brush.ChromaticEdge}"
+                <Border x:Name="ChromaticLayer" Margin="1.4" BorderThickness="1" BorderBrush="{DynamicResource Brush.ChromaticEdge}"
                         CornerRadius="{Binding CornerRadius, ElementName=IslandBorder}" IsHitTestVisible="False"/>
 
                 <!-- breathing glints: light slowly travels between the two edges -->
-                <Border x:Name="GlintA" BorderThickness="1.4" BorderBrush="{StaticResource Brush.GlintTopLeft}"
+                <Border x:Name="GlintA" BorderThickness="1.4" BorderBrush="{DynamicResource Brush.GlintTopLeft}"
                         CornerRadius="{Binding CornerRadius, ElementName=IslandBorder}" IsHitTestVisible="False" Opacity="0.2"/>
-                <Border x:Name="GlintB" BorderThickness="1.4" BorderBrush="{StaticResource Brush.GlintBottomRight}"
+                <Border x:Name="GlintB" BorderThickness="1.4" BorderBrush="{DynamicResource Brush.GlintBottomRight}"
                         CornerRadius="{Binding CornerRadius, ElementName=IslandBorder}" IsHitTestVisible="False" Opacity="0.9"/>
+
+                <!-- breathing accent border while expanded (mac BreathingBorder) -->
+                <Border x:Name="AccentBorder" BorderThickness="1.5" IsHitTestVisible="False" Opacity="0"
+                        CornerRadius="{Binding CornerRadius, ElementName=IslandBorder}">
+                    <Border.BorderBrush>
+                        <LinearGradientBrush x:Name="AccentBorderBrush" StartPoint="0,0" EndPoint="1,1">
+                            <GradientStop x:Name="AccentStop0" Color="#2038DBC7" Offset="0"/>
+                            <GradientStop x:Name="AccentStop1" Color="#E038DBC7" Offset="0.45"/>
+                            <GradientStop Color="#B8FFFFFF" Offset="0.6"/>
+                            <GradientStop x:Name="AccentStop2" Color="#7038DBC7" Offset="0.8"/>
+                            <GradientStop x:Name="AccentStop3" Color="#2038DBC7" Offset="1"/>
+                        </LinearGradientBrush>
+                    </Border.BorderBrush>
+                </Border>
 
                 <!-- sheen band swept across on expand / notification -->
                 <Border x:Name="SheenBand" Width="150" HorizontalAlignment="Left" Opacity="0"
-                        Background="{StaticResource Brush.SheenSweep}" IsHitTestVisible="False">
+                        Background="{DynamicResource Brush.SheenSweep}" IsHitTestVisible="False">
                     <Border.RenderTransform>
                         <TransformGroup>
                             <SkewTransform AngleX="-18"/>
@@ -103,6 +119,14 @@
                         </TransformGroup>
                     </Border.RenderTransform>
                 </Border>
+
+                <!-- corner resize handles (mac PanelResizeHandle), expanded only -->
+                <Border x:Name="ResizeLeft" Width="28" Height="28" HorizontalAlignment="Left" VerticalAlignment="Bottom"
+                        Background="Transparent" Cursor="SizeNESW" Visibility="Collapsed" ToolTip="拖动调整面板大小"
+                        MouseLeftButtonDown="OnResizeDown" MouseMove="OnResizeMove" MouseLeftButtonUp="OnResizeUp"/>
+                <Border x:Name="ResizeRight" Width="28" Height="28" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                        Background="Transparent" Cursor="SizeNWSE" Visibility="Collapsed" ToolTip="拖动调整面板大小"
+                        MouseLeftButtonDown="OnResizeDown" MouseMove="OnResizeMove" MouseLeftButtonUp="OnResizeUp"/>
             </Grid>
         </Border>
     </Grid>

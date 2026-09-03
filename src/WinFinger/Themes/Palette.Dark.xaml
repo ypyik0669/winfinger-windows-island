@@ -1,0 +1,100 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- Dark palette (mac MacFingerPalette isDark=true) -->
+    <Color x:Key="Color.IslandBlack">#FF060606</Color>
+    <Color x:Key="Color.IslandBlackDeep">#FF000000</Color>
+    <Color x:Key="Color.Surface">#FF111114</Color>
+    <Color x:Key="Color.SurfaceHover">#FF1C1C21</Color>
+    <Color x:Key="Color.Accent">#FF0A84FF</Color>
+    <Color x:Key="Color.Green">#FF30D158</Color>
+    <Color x:Key="Color.Orange">#FFFF9F0A</Color>
+    <Color x:Key="Color.Red">#FFFF453A</Color>
+    <Color x:Key="Color.TextPrimary">#FFF5F5F7</Color>
+    <Color x:Key="Color.TextSecondary">#FF9EA6B3</Color>
+    <Color x:Key="Color.TextTertiary">#FF6B7280</Color>
+    <Color x:Key="Color.Teal">#FF38DBC7</Color>
+    <Color x:Key="Color.Upload">#FF42E073</Color>
+    <Color x:Key="Color.Download">#FF4D9EFF</Color>
+    <Color x:Key="Color.Warning">#FFFFBA59</Color>
+    <Color x:Key="Color.Danger">#FFFF616E</Color>
+    <Color x:Key="Color.Background">#FF050607</Color>
+
+    <SolidColorBrush x:Key="Brush.Island" Color="#FF060606"/>
+    <SolidColorBrush x:Key="Brush.Background" Color="#FF050607"/>
+    <SolidColorBrush x:Key="Brush.BackgroundTop" Color="#FF080A0D"/>
+    <SolidColorBrush x:Key="Brush.Surface" Color="#17FFFFFF"/>
+    <SolidColorBrush x:Key="Brush.SurfaceHover" Color="#26FFFFFF"/>
+    <SolidColorBrush x:Key="Brush.SurfaceElevated" Color="#FF1D2126"/>
+    <SolidColorBrush x:Key="Brush.Fill" Color="#0FFFFFFF"/>
+    <SolidColorBrush x:Key="Brush.FillStrong" Color="#1FFFFFFF"/>
+    <SolidColorBrush x:Key="Brush.Hairline" Color="#29FFFFFF"/>
+    <SolidColorBrush x:Key="Brush.Border" Color="#1FFFFFFF"/>
+    <SolidColorBrush x:Key="Brush.Accent" Color="#FF0A84FF"/>
+    <SolidColorBrush x:Key="Brush.Green" Color="#FF30D158"/>
+    <SolidColorBrush x:Key="Brush.Orange" Color="#FFFF9F0A"/>
+    <SolidColorBrush x:Key="Brush.Red" Color="#FFFF453A"/>
+    <SolidColorBrush x:Key="Brush.Teal" Color="#FF38DBC7"/>
+    <SolidColorBrush x:Key="Brush.Upload" Color="#FF42E073"/>
+    <SolidColorBrush x:Key="Brush.Download" Color="#FF4D9EFF"/>
+    <SolidColorBrush x:Key="Brush.Warning" Color="#FFFFBA59"/>
+    <SolidColorBrush x:Key="Brush.Danger" Color="#FFFF616E"/>
+    <SolidColorBrush x:Key="Brush.TextPrimary" Color="#F5FFFFFF"/>
+    <SolidColorBrush x:Key="Brush.TextSecondary" Color="#FF9EA6B3"/>
+    <SolidColorBrush x:Key="Brush.TextTertiary" Color="#FF6B7280"/>
+    <SolidColorBrush x:Key="Brush.OnAccent" Color="#D1000000"/>
+    <SolidColorBrush x:Key="Brush.Stroke" Color="#22FFFFFF"/>
+    <SolidColorBrush x:Key="Brush.Divider" Color="#0DFFFFFF"/>
+    <SolidColorBrush x:Key="Brush.PopoverBackground" Color="#F2101216"/>
+    <SolidColorBrush x:Key="Brush.WarningSoft" Color="#59FFBA59"/>
+    <SolidColorBrush x:Key="Brush.WarningFill" Color="#1FFFBA59"/>
+    <SolidColorBrush x:Key="Brush.DangerFill" Color="#1FFF616E"/>
+    <SolidColorBrush x:Key="Brush.DangerFillStrong" Color="#38FF616E"/>
+    <SolidColorBrush x:Key="Brush.Card" Color="#14FFFFFF"/>
+    <SolidColorBrush x:Key="Brush.Sidebar" Color="#66080A0D"/>
+
+    <!-- Liquid Glass material -->
+    <LinearGradientBrush x:Key="Brush.IslandBody" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#4614141C" Offset="0"/>
+        <GradientStop Color="#520E0E16" Offset="0.35"/>
+        <GradientStop Color="#600A0A12" Offset="1"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="Brush.GlassRim" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#92FFFFFF" Offset="0"/>
+        <GradientStop Color="#30FFFFFF" Offset="0.35"/>
+        <GradientStop Color="#16FFFFFF" Offset="0.7"/>
+        <GradientStop Color="#26FFFFFF" Offset="1"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="Brush.GlassInnerEdge" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#38000000" Offset="0"/>
+        <GradientStop Color="#14000000" Offset="0.5"/>
+        <GradientStop Color="#28000000" Offset="1"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="Brush.TopSheen" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#2EFFFFFF" Offset="0"/>
+        <GradientStop Color="#0CFFFFFF" Offset="0.18"/>
+        <GradientStop Color="#00FFFFFF" Offset="0.45"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="Brush.GlintTopLeft" StartPoint="0,0" EndPoint="0.75,0.95">
+        <GradientStop Color="#B4FFFFFF" Offset="0"/>
+        <GradientStop Color="#30FFFFFF" Offset="0.22"/>
+        <GradientStop Color="#00FFFFFF" Offset="0.5"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="Brush.GlintBottomRight" StartPoint="1,1" EndPoint="0.25,0.05">
+        <GradientStop Color="#7ACFE8FF" Offset="0"/>
+        <GradientStop Color="#1ECFE8FF" Offset="0.25"/>
+        <GradientStop Color="#00CFE8FF" Offset="0.55"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="Brush.ChromaticEdge" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#2E6FD8FF" Offset="0"/>
+        <GradientStop Color="#00000000" Offset="0.32"/>
+        <GradientStop Color="#00000000" Offset="0.68"/>
+        <GradientStop Color="#28FFB35C" Offset="1"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="Brush.SheenSweep" StartPoint="0,0" EndPoint="1,0">
+        <GradientStop Color="#00FFFFFF" Offset="0"/>
+        <GradientStop Color="#2AFFFFFF" Offset="0.45"/>
+        <GradientStop Color="#3EFFFFFF" Offset="0.5"/>
+        <GradientStop Color="#2AFFFFFF" Offset="0.55"/>
+        <GradientStop Color="#00FFFFFF" Offset="1"/>
+    </LinearGradientBrush>
+</ResourceDictionary>

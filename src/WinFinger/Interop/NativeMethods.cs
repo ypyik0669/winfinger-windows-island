@@ -236,4 +236,73 @@ internal static class NativeMethods
     [DllImport("kernel32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool SetProcessWorkingSetSize(IntPtr hProcess, IntPtr min, IntPtr max);
+
+    // ── Win32 menu bar (live shortcut reading) ──
+    public const uint MF_BYPOSITION = 0x00000400;
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetMenu(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetSubMenu(IntPtr hMenu, int nPos);
+
+    [DllImport("user32.dll")]
+    public static extern int GetMenuItemCount(IntPtr hMenu);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetMenuStringW")]
+    public static extern int GetMenuString(IntPtr hMenu, uint uIDItem, System.Text.StringBuilder lpString, int cchMax, uint flags);
+
+    // ── Monitors (multi-display floating / snap-to-top) ──
+    public const uint MONITOR_DEFAULTTONEAREST = 2;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct MONITORINFO
+    {
+        public int cbSize;
+        public RECT rcMonitor;
+        public RECT rcWork;
+        public uint dwFlags;
+    }
+
+    public delegate bool MonitorEnumProc(IntPtr hMonitor, IntPtr hdcMonitor, ref RECT lprcMonitor, IntPtr dwData);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool EnumDisplayMonitors(IntPtr hdc, IntPtr lprcClip, MonitorEnumProc lpfnEnum, IntPtr dwData);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr MonitorFromPoint(POINT pt, uint dwFlags);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
+
+    [DllImport("shcore.dll")]
+    public static extern int GetDpiForMonitor(IntPtr hmonitor, int dpiType, out uint dpiX, out uint dpiY);
+
+    /// <summary>All monitor rectangles in device pixels.</summary>
+    public static List<RECT> MonitorRects()
+    {
+        var list = new List<RECT>();
+        MonitorEnumProc proc = (IntPtr _, IntPtr _, ref RECT r, IntPtr _) =>
+        {
+            list.Add(r);
+            return true;
+        };
+        EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, proc, IntPtr.Zero);
+        GC.KeepAlive(proc);
+        return list;
+    }
 }

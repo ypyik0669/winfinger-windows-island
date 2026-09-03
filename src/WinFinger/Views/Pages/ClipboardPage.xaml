@@ -5,29 +5,108 @@
              xmlns:models="clr-namespace:WinFinger.Models">
     <UserControl.Resources>
         <controls:RelativeTimeConverter x:Key="RelativeTime"/>
-        <controls:ImagePathToThumbnailConverter x:Key="Thumbnail"/>
+        <controls:ImagePathToThumbnailConverter x:Key="Thumbnail" DecodeWidth="120"/>
+        <controls:FilePathToIconConverter x:Key="FileIcon"/>
         <controls:NullToCollapsedConverter x:Key="NullToCollapsed"/>
+        <controls:EnumToVisibilityConverter x:Key="KindVisible"/>
+        <controls:BoolToVisibilityConverter x:Key="BoolVisible"/>
     </UserControl.Resources>
 
-    <Grid>
+    <Grid Margin="20,20,20,20">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <!-- toolbar -->
-        <Grid Grid.Row="0" Margin="2,0,2,8">
-            <TextBlock Style="{StaticResource Text.Title}" Text="剪贴板历史" VerticalAlignment="Center"/>
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button x:Name="PauseButton" Style="{StaticResource Button.Ghost}" Content="暂停记录" FontSize="12"/>
-                <Button x:Name="ClearButton" Style="{StaticResource Button.Ghost}" Content="清空" FontSize="12" Margin="4,0,0,0"/>
-            </StackPanel>
+        <!-- search + pause + clear (mac top row) -->
+        <Grid Grid.Row="0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0" Height="34" CornerRadius="12" Background="{DynamicResource Brush.Surface}"
+                    BorderBrush="{DynamicResource Brush.Border}" BorderThickness="1">
+                <Grid Margin="10,0,6,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" FontFamily="{StaticResource Font.Icon}" FontSize="12" Text="&#xE721;"
+                               Foreground="{DynamicResource Brush.TextSecondary}" VerticalAlignment="Center"/>
+                    <Grid Grid.Column="1" Margin="8,0,0,0">
+                        <TextBlock x:Name="SearchPlaceholder" Text="搜索文本、文件或来源应用" FontSize="13"
+                                   FontFamily="{StaticResource Font.Text}" Foreground="{DynamicResource Brush.TextTertiary}"
+                                   VerticalAlignment="Center" IsHitTestVisible="False"/>
+                        <TextBox x:Name="SearchBox" Style="{StaticResource TextBox.Plain}" FontSize="13"
+                                 VerticalAlignment="Center" VerticalContentAlignment="Center"/>
+                    </Grid>
+                    <Button x:Name="ClearSearchButton" Grid.Column="2" Style="{StaticResource Button.Icon}" Width="24" Height="24"
+                            Content="&#xE894;" FontSize="11" ToolTip="清除搜索" Visibility="Collapsed"/>
+                </Grid>
+            </Border>
+
+            <Button x:Name="PauseButton" Grid.Column="1" Style="{StaticResource Button.Secondary}" Margin="10,0,0,0">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock x:Name="PauseGlyph" FontFamily="{StaticResource Font.Icon}" FontSize="10" Text="&#xE769;" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="PauseLabel" Text="暂停记录" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Button>
+            <Button x:Name="ClearButton" Grid.Column="2" Style="{StaticResource Button.Danger}" Margin="10,0,0,0">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock FontFamily="{StaticResource Font.Icon}" FontSize="10" Text="&#xE74D;" VerticalAlignment="Center"/>
+                    <TextBlock Text="清空" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Button>
+        </Grid>
+
+        <!-- filter capsule bar + count -->
+        <Grid Grid.Row="1" Margin="0,12,0,0">
+            <Border HorizontalAlignment="Left" Background="{DynamicResource Brush.Fill}" CornerRadius="17" Padding="3">
+                <StackPanel Orientation="Horizontal">
+                    <RadioButton x:Name="FilterAll" Style="{StaticResource Button.FilterPill}" GroupName="ClipFilter" IsChecked="True">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock FontFamily="{StaticResource Font.Icon}" FontSize="10" Text="&#xE8FD;" VerticalAlignment="Center"/>
+                            <TextBlock Text="全部" Margin="5,0,0,0"/>
+                        </StackPanel>
+                    </RadioButton>
+                    <RadioButton x:Name="FilterText" Style="{StaticResource Button.FilterPill}" GroupName="ClipFilter" Margin="4,0,0,0">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock FontFamily="{StaticResource Font.Icon}" FontSize="10" Text="&#xE8D2;" VerticalAlignment="Center"/>
+                            <TextBlock Text="文本" Margin="5,0,0,0"/>
+                        </StackPanel>
+                    </RadioButton>
+                    <RadioButton x:Name="FilterImage" Style="{StaticResource Button.FilterPill}" GroupName="ClipFilter" Margin="4,0,0,0">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock FontFamily="{StaticResource Font.Icon}" FontSize="10" Text="&#xEB9F;" VerticalAlignment="Center"/>
+                            <TextBlock Text="图像" Margin="5,0,0,0"/>
+                        </StackPanel>
+                    </RadioButton>
+                    <RadioButton x:Name="FilterFile" Style="{StaticResource Button.FilterPill}" GroupName="ClipFilter" Margin="4,0,0,0">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock FontFamily="{StaticResource Font.Icon}" FontSize="10" Text="&#xE7C3;" VerticalAlignment="Center"/>
+                            <TextBlock Text="文件" Margin="5,0,0,0"/>
+                        </StackPanel>
+                    </RadioButton>
+                    <RadioButton x:Name="FilterFavorite" Style="{StaticResource Button.FilterPill}" GroupName="ClipFilter" Margin="4,0,0,0">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock FontFamily="{StaticResource Font.Icon}" FontSize="10" Text="&#xE734;" VerticalAlignment="Center"/>
+                            <TextBlock Text="收藏" Margin="5,0,0,0"/>
+                        </StackPanel>
+                    </RadioButton>
+                </StackPanel>
+            </Border>
+            <TextBlock x:Name="CountLabel" HorizontalAlignment="Right" VerticalAlignment="Center" FontSize="11" FontWeight="Medium"
+                       FontFamily="{StaticResource Font.Text}" Foreground="{DynamicResource Brush.TextSecondary}" Text="0 条"/>
         </Grid>
 
         <!-- entries -->
-        <ListBox x:Name="EntryList" Grid.Row="1" Background="Transparent" BorderThickness="0"
-                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                 VirtualizingPanel.ScrollUnit="Pixel">
+        <ListBox x:Name="EntryList" Grid.Row="2" Margin="0,12,0,0" Background="Transparent" BorderThickness="0"
+                 ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto"
+                 VirtualizingPanel.ScrollUnit="Pixel" Padding="0,2">
             <ListBox.Resources>
                 <Style TargetType="ScrollViewer" BasedOn="{StaticResource Scroll.Dark}"/>
             </ListBox.Resources>
@@ -35,16 +114,21 @@
                 <Style TargetType="ListBoxItem">
                     <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
                     <Setter Property="Focusable" Value="False"/>
+                    <Setter Property="Cursor" Value="Hand"/>
                     <Setter Property="Template">
                         <Setter.Value>
                             <ControlTemplate TargetType="ListBoxItem">
-                                <Border x:Name="bg" Background="Transparent" CornerRadius="12" Margin="0,0,6,4" Padding="12,9">
+                                <Border x:Name="card" Background="{DynamicResource Brush.Card}" CornerRadius="14" Margin="0,0,6,8"
+                                        Padding="12,9" BorderThickness="1" BorderBrush="{DynamicResource Brush.Border}">
                                     <ContentPresenter/>
                                 </Border>
                                 <ControlTemplate.Triggers>
                                     <Trigger Property="IsMouseOver" Value="True">
-                                        <Setter TargetName="bg" Property="Background" Value="{StaticResource Brush.Surface}"/>
+                                        <Setter TargetName="card" Property="Background" Value="{DynamicResource Brush.SurfaceHover}"/>
                                     </Trigger>
+                                    <DataTrigger Binding="{Binding IsFavorite}" Value="True">
+                                        <Setter TargetName="card" Property="BorderBrush" Value="{DynamicResource Brush.WarningSoft}"/>
+                                    </DataTrigger>
                                 </ControlTemplate.Triggers>
                             </ControlTemplate>
                         </Setter.Value>
@@ -53,49 +137,82 @@
             </ListBox.ItemContainerStyle>
             <ListBox.ItemTemplate>
                 <DataTemplate DataType="{x:Type models:ClipboardEntry}">
-                    <Grid>
+                    <Grid Background="Transparent" MouseLeftButtonUp="OnRowClicked" Tag="{Binding}">
                         <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
 
-                        <StackPanel Grid.Column="0">
-                            <!-- text entry -->
-                            <TextBlock Style="{StaticResource Text.Body}" Text="{Binding Text}"
-                                       Visibility="{Binding Text, Converter={StaticResource NullToCollapsed}}"
-                                       TextTrimming="CharacterEllipsis" MaxHeight="40" TextWrapping="Wrap"/>
-                            <!-- image entry -->
-                            <Border CornerRadius="8" HorizontalAlignment="Left" ClipToBounds="True"
-                                    Cursor="Hand" Background="#01000000"
-                                    Tag="{Binding}" MouseLeftButtonUp="OnPreviewImage"
-                                    ToolTip="点击放大查看"
-                                    Visibility="{Binding ImagePath, Converter={StaticResource NullToCollapsed}}">
-                                <Image Source="{Binding ImagePath, Converter={StaticResource Thumbnail}}"
-                                       MaxHeight="72" MaxWidth="220" Stretch="Uniform"/>
-                            </Border>
-                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-                                <TextBlock Style="{StaticResource Text.Micro}" Foreground="{StaticResource Brush.TextTertiary}"
-                                           Text="{Binding SourceAppName}"
-                                           Visibility="{Binding SourceAppName, Converter={StaticResource NullToCollapsed}}"
-                                           Margin="0,0,8,0"/>
-                                <TextBlock Style="{StaticResource Text.Micro}" Foreground="{StaticResource Brush.TextTertiary}"
-                                           Text="{Binding CreatedAt, Converter={StaticResource RelativeTime}}"/>
-                            </StackPanel>
+                        <!-- 42×42 thumbnail -->
+                        <Border Grid.Column="0" Width="42" Height="42" CornerRadius="10" Background="{DynamicResource Brush.BackgroundTop}"
+                                VerticalAlignment="Center" ClipToBounds="True"
+                                Tag="{Binding}" MouseEnter="OnThumbEnter" MouseLeave="OnThumbLeave" MouseLeftButtonUp="OnThumbClicked">
+                            <Border.Clip>
+                                <RectangleGeometry Rect="0,0,42,42" RadiusX="10" RadiusY="10"/>
+                            </Border.Clip>
+                            <Grid>
+                                <TextBlock FontFamily="{StaticResource Font.Icon}" FontSize="17" Text="&#xE8A5;"
+                                           Foreground="{DynamicResource Brush.Teal}" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                           Visibility="{Binding Kind, Converter={StaticResource KindVisible}, ConverterParameter=Text}"/>
+                                <Image Source="{Binding ImagePath, Converter={StaticResource Thumbnail}}" Stretch="UniformToFill"
+                                       Visibility="{Binding Kind, Converter={StaticResource KindVisible}, ConverterParameter=Image}"/>
+                                <Image Source="{Binding FirstFilePath, Converter={StaticResource FileIcon}}" Stretch="Uniform" Margin="4"
+                                       Visibility="{Binding Kind, Converter={StaticResource KindVisible}, ConverterParameter=File}"/>
+                            </Grid>
+                        </Border>
+
+                        <!-- title + meta -->
+                        <StackPanel Grid.Column="1" Margin="12,0,12,0" VerticalAlignment="Center">
+                            <TextBlock FontSize="13" FontWeight="Medium" FontFamily="{StaticResource Font.Text}"
+                                       Foreground="{DynamicResource Brush.TextPrimary}" Text="{Binding DisplayTitle}"
+                                       TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="36"/>
+                            <TextBlock FontSize="10" FontFamily="{StaticResource Font.Text}" Foreground="{DynamicResource Brush.TextSecondary}"
+                                       Margin="0,3,0,0" TextTrimming="CharacterEllipsis">
+                                <Run Text="{Binding KindTitle, Mode=OneWay}"/><Run Text=" · "/><Run Text="{Binding DetailLabel, Mode=OneWay}"/><Run Text=" · "/><Run Text="{Binding SourceAppLabel, Mode=OneWay}"/><Run Text=" · "/><Run Text="{Binding CreatedAt, Converter={StaticResource RelativeTime}, Mode=OneWay}"/>
+                            </TextBlock>
                         </StackPanel>
 
-                        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                            <Button Style="{StaticResource Button.Ghost}" Content="复制" FontSize="11"
-                                    Click="OnCopyEntry" Tag="{Binding}"/>
-                            <Button Style="{StaticResource Button.Ghost}" Content="删除" FontSize="11" Margin="2,0,0,0"
-                                    Click="OnDeleteEntry" Tag="{Binding}"/>
+                        <!-- star / copy / delete -->
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                            <Button Style="{StaticResource Button.Icon}" Click="OnToggleFavorite" Tag="{Binding}">
+                                <Button.ToolTip>
+                                    <ToolTip Content="收藏"/>
+                                </Button.ToolTip>
+                                <Grid>
+                                    <TextBlock Text="&#xE734;" Visibility="{Binding IsFavorite, Converter={StaticResource BoolVisible}, ConverterParameter=invert}"/>
+                                    <TextBlock Text="&#xE735;" Foreground="{DynamicResource Brush.Warning}"
+                                               Visibility="{Binding IsFavorite, Converter={StaticResource BoolVisible}}"/>
+                                </Grid>
+                            </Button>
+                            <Button Style="{StaticResource Button.Icon}" Width="32" Height="32" Content="&#xE8C8;" ToolTip="复制此条记录"
+                                    Click="OnCopyEntry" Tag="{Binding}" Margin="2,0,0,0"/>
+                            <Button Style="{StaticResource Button.Icon}" Content="&#xE711;" ToolTip="删除此条记录"
+                                    Click="OnDeleteEntry" Tag="{Binding}" Margin="2,0,0,0"/>
                         </StackPanel>
                     </Grid>
                 </DataTemplate>
             </ListBox.ItemTemplate>
         </ListBox>
 
-        <TextBlock x:Name="EmptyHint" Grid.Row="1" Style="{StaticResource Text.Secondary}"
-                   HorizontalAlignment="Center" VerticalAlignment="Center"
-                   Text="复制点什么，历史会出现在这里" Visibility="Collapsed"/>
+        <!-- empty state -->
+        <StackPanel x:Name="EmptyState" Grid.Row="2" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed">
+            <TextBlock x:Name="EmptyGlyph" FontFamily="{StaticResource Font.Icon}" FontSize="30" FontWeight="Light"
+                       Foreground="{DynamicResource Brush.Teal}" HorizontalAlignment="Center" Text="&#xE77F;"/>
+            <TextBlock x:Name="EmptyTitle" FontSize="15" FontWeight="SemiBold" FontFamily="{StaticResource Font.Text}"
+                       Foreground="{DynamicResource Brush.TextPrimary}" HorizontalAlignment="Center" Margin="0,10,0,0" Text="还没有复制记录"/>
+            <TextBlock x:Name="EmptySubtitle" FontSize="12" FontFamily="{StaticResource Font.Text}"
+                       Foreground="{DynamicResource Brush.TextSecondary}" HorizontalAlignment="Center" Margin="0,4,0,0"
+                       Text="复制文本、图片或文件后，它们会出现在这里"/>
+        </StackPanel>
+
+        <!-- 1s hover image preview (mac ClipboardImageHoverPreview) -->
+        <Popup x:Name="PreviewPopup" Placement="Right" HorizontalOffset="8" AllowsTransparency="True" StaysOpen="True"
+               PopupAnimation="Fade">
+            <Border Background="{DynamicResource Brush.PopoverBackground}" CornerRadius="10" Padding="8"
+                    BorderBrush="{DynamicResource Brush.Hairline}" BorderThickness="1">
+                <Image x:Name="PreviewImage" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality"/>
+            </Border>
+        </Popup>
     </Grid>
 </UserControl>

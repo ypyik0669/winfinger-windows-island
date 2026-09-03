@@ -12,11 +12,47 @@ public enum AppPage
     Pomodoro
 }
 
+public static class AppPageInfo
+{
+    /// <summary>mac AppPage.title.</summary>
+    public static string Title(this AppPage page) => page switch
+    {
+        AppPage.Clipboard => "剪贴板",
+        AppPage.Media => "音乐",
+        AppPage.Notes => "便利贴",
+        AppPage.Shortcuts => "快捷键",
+        AppPage.Pomodoro => "番茄钟",
+        _ => ""
+    };
+
+    /// <summary>Segoe Fluent / MDL2 glyph standing in for the mac SF symbol.</summary>
+    public static string Glyph(this AppPage page) => page switch
+    {
+        AppPage.Clipboard => "\uE77F", // doc.on.clipboard
+        AppPage.Media => "\uE8D6",     // music.note
+        AppPage.Notes => "\uE70B",     // note.text
+        AppPage.Shortcuts => "\uE765", // command
+        AppPage.Pomodoro => "\uE823",  // timer
+        _ => ""
+    };
+}
+
 /// <summary>Central application state (counterpart of mac's AppModel).</summary>
 public sealed partial class AppViewModel : ObservableObject
 {
     [ObservableProperty] private bool _isExpanded;
     [ObservableProperty] private AppPage _selectedPage = AppPage.Clipboard;
+
+    /// <summary>"black" (纯黑) or "glass" (Liquid Glass) — mac MacFingerAppearance.</summary>
+    [ObservableProperty] private string _appearanceStyle = "glass";
+    /// <summary>"top" or "floating" — mac MacFingerDockMode.</summary>
+    [ObservableProperty] private string _dockMode = "top";
+    /// <summary>Locked panel: clicking outside doesn't collapse — mac isExpandedPinned.</summary>
+    [ObservableProperty] private bool _isExpandedPinned;
+    /// <summary>User-chosen expanded width (0 = default) — mac expandedUserSize.</summary>
+    [ObservableProperty] private double _expandedUserWidth;
+    /// <summary>True while the island is being dragged (lightweight glass, paused ambience).</summary>
+    [ObservableProperty] private bool _isDraggingPanel;
 
     public MetricsService Metrics { get; } = new();
     public ClipboardStore ClipboardStore { get; } = new();
@@ -25,10 +61,15 @@ public sealed partial class AppViewModel : ObservableObject
     public ShortcutCatalogService ShortcutCatalog { get; } = new();
     public ForegroundAppService ForegroundApp { get; } = new();
     public MediaService Media { get; } = new();
+    public LyricsService Lyrics { get; } = new();
     public AudioVisualizerService Visualizer { get; } = new();
     public PomodoroService Pomodoro { get; } = new();
     public NotificationService Notifications { get; } = new();
     public SettingsService SettingsStore { get; } = new();
+    public ThemeService Theme { get; } = new();
+
+    /// <summary>Raised by the window layer when Ctrl+N is pressed while the notes page is showing.</summary>
+    public event Action? NewNoteRequested;
 
     public AppViewModel()
     {
@@ -38,6 +79,11 @@ public sealed partial class AppViewModel : ObservableObject
         ClipboardMonitor.IsPaused = settings.ClipboardPaused;
         Pomodoro.FocusMinutes = settings.PomodoroFocusMinutes;
         Pomodoro.BreakMinutes = settings.PomodoroBreakMinutes;
+        Pomodoro.CompletedFocusCount = Math.Max(0, settings.PomodoroCompletedFocusCount);
+        _appearanceStyle = settings.AppearanceStyle == "black" ? "black" : "glass";
+        _dockMode = settings.DockMode == "floating" ? "floating" : "top";
+        _isExpandedPinned = settings.IsExpandedPinned;
+        _expandedUserWidth = settings.ExpandedUserWidth;
 
         ClipboardMonitor.PropertyChanged += (_, e) =>
         {
@@ -53,6 +99,11 @@ public sealed partial class AppViewModel : ObservableObject
             {
                 settings.PomodoroFocusMinutes = Pomodoro.FocusMinutes;
                 settings.PomodoroBreakMinutes = Pomodoro.BreakMinutes;
+                SettingsStore.Save();
+            }
+            else if (e.PropertyName == nameof(PomodoroService.CompletedFocusCount))
+            {
+                settings.PomodoroCompletedFocusCount = Pomodoro.CompletedFocusCount;
                 SettingsStore.Save();
             }
         };
@@ -75,28 +126,60 @@ public sealed partial class AppViewModel : ObservableObject
             {
                 var entry = ClipboardStore.Entries.FirstOrDefault();
                 if (entry is null) return;
-                var preview = entry.Kind == Models.ClipboardEntryKind.Image
-                    ? "已记录图片"
-                    : Truncate(entry.Text ?? "", 24);
+                var preview = entry.Kind switch
+                {
+                    Models.ClipboardEntryKind.Image => "已记录图片",
+                    Models.ClipboardEntryKind.File => entry.DisplayTitle,
+                    _ => Truncate(entry.Text ?? "", 24)
+                };
                 Notifications.Post("📋", preview);
             }
         };
     }
 
+    partial void OnAppearanceStyleChanged(string value)
+    {
+        SettingsStore.Settings.AppearanceStyle = value;
+        SettingsStore.Save();
+        Theme.SetAppearanceStyle(value);
+    }
+
+    partial void OnDockModeChanged(string value)
+    {
+        SettingsStore.Settings.DockMode = value;
+        SettingsStore.Save();
+    }
+
+    partial void OnIsExpandedPinnedChanged(bool value)
+    {
+        SettingsStore.Settings.IsExpandedPinned = value;
+        SettingsStore.Save();
+    }
+
+    partial void OnExpandedUserWidthChanged(double value)
+    {
+        SettingsStore.Settings.ExpandedUserWidth = value;
+        SettingsStore.Save();
+    }
+
     public void Start()
     {
         StoragePaths.EnsureCreated();
+        Theme.Start(AppearanceStyle);
         Metrics.Start();
         ForegroundApp.Start();
         Media.Start();
+        Lyrics.Start(Media);
     }
 
     public void Stop()
     {
+        Theme.Stop();
         Metrics.Stop();
         ForegroundApp.Stop();
         ClipboardMonitor.Detach();
         Visualizer.Stop();
+        Lyrics.Stop();
         Media.Stop();
         Pomodoro.Pause();
     }
@@ -111,9 +194,13 @@ public sealed partial class AppViewModel : ObservableObject
 
     public void Collapse() => IsExpanded = false;
 
+    public void ToggleExpandedPinned() => IsExpandedPinned = !IsExpandedPinned;
+
     public void Select(AppPage page)
     {
         SelectedPage = page;
         IsExpanded = true;
     }
+
+    public void RequestNewNote() => NewNoteRequested?.Invoke();
 }

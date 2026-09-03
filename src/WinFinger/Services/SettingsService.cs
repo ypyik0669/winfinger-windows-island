@@ -22,6 +22,21 @@ public sealed class AppSettings
     public double GhostOpacity { get; set; } = 0.4;
     public bool GlintEnabled { get; set; } = true;
     public bool ChromaticEnabled { get; set; } = true;
+
+    // ── parity with mac 1.1.0 ──
+    /// <summary>"black" = 纯黑 (always dark), "glass" = Liquid Glass (follows system light/dark).</summary>
+    public string AppearanceStyle { get; set; } = "glass";
+    /// <summary>"top" = docked to the top edge, "floating" = free position.</summary>
+    public string DockMode { get; set; } = "top";
+    /// <summary>Window origin (DIP) used in floating mode.</summary>
+    public double FloatingLeft { get; set; } = double.NaN;
+    public double FloatingTop { get; set; } = double.NaN;
+    /// <summary>Locked expanded panel: clicking outside doesn't collapse.</summary>
+    public bool IsExpandedPinned { get; set; }
+    /// <summary>User-resized expanded panel width (0 = default).</summary>
+    public double ExpandedUserWidth { get; set; }
+    /// <summary>Completed focus sessions, never reset.</summary>
+    public int PomodoroCompletedFocusCount { get; set; }
 }
 
 /// <summary>settings.json persistence + the HKCU Run auto-start key.</summary>

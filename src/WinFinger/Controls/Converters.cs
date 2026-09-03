@@ -2,22 +2,25 @@ using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Windows.Data;
+using System.Windows.Interop;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
 
 namespace WinFinger.Controls;
 
-/// <summary>"刚刚 / 5 分钟前 / 昨天 14:30 / 08-12" style timestamps.</summary>
+/// <summary>"刚刚 / 5分钟 / 2小时 / 3天" style relative timestamps (mac SwiftUI .relative).</summary>
 public sealed class RelativeTimeConverter : IValueConverter
 {
     public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
     {
         if (value is not DateTime time) return "";
         var delta = DateTime.Now - time;
-        if (delta.TotalMinutes < 1) return "刚刚";
-        if (delta.TotalHours < 1) return $"{(int)delta.TotalMinutes} 分钟前";
-        if (time.Date == DateTime.Today) return time.ToString("HH:mm");
-        if (time.Date == DateTime.Today.AddDays(-1)) return $"昨天 {time:HH:mm}";
-        return time.ToString("MM-dd");
+        if (delta.TotalSeconds < 60) return "刚刚";
+        if (delta.TotalMinutes < 60) return $"{(int)delta.TotalMinutes}分钟";
+        if (delta.TotalHours < 24) return $"{(int)delta.TotalHours}小时";
+        if (delta.TotalDays < 30) return $"{(int)delta.TotalDays}天";
+        if (delta.TotalDays < 365) return $"{(int)(delta.TotalDays / 30)}个月";
+        return $"{(int)(delta.TotalDays / 365)}年";
     }
 
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
@@ -53,11 +56,92 @@ public sealed class ImagePathToThumbnailConverter : IValueConverter
         => throw new NotSupportedException();
 }
 
+/// <summary>Shell icon for a file path (mac NSWorkspace.icon(forFile:)), cached per extension/path.</summary>
+public sealed class FilePathToIconConverter : IValueConverter
+{
+    private static readonly Dictionary<string, ImageSource?> Cache = new(StringComparer.OrdinalIgnoreCase);
+
+    public object? Convert(object? value, Type targetType, object parameter, CultureInfo culture)
+    {
+        if (value is not string path || path.Length == 0) return null;
+        string key = Directory.Exists(path) ? "<dir>" : Path.GetExtension(path) is { Length: > 0 } ext && ext != ".exe" && ext != ".lnk" ? ext : path;
+        lock (Cache)
+        {
+            if (Cache.TryGetValue(key, out var cached)) return cached;
+        }
+        ImageSource? result = null;
+        try
+        {
+            if (File.Exists(path))
+            {
+                using var icon = System.Drawing.Icon.ExtractAssociatedIcon(path);
+                if (icon is not null)
+                {
+                    var src = Imaging.CreateBitmapSourceFromHIcon(icon.Handle, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
+                    src.Freeze();
+                    result = src;
+                }
+            }
+        }
+        catch
+        {
+            result = null;
+        }
+        lock (Cache)
+        {
+            Cache[key] = result;
+        }
+        return result;
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}
+
+/// <summary>Note body → single-line preview, "空便签" when empty (mac notes list row).</summary>
+public sealed class NotePreviewConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object parameter, CultureInfo culture)
+    {
+        var body = (value as string ?? "").ReplaceLineEndings(" ").Trim();
+        return body.Length == 0 ? "空便签" : body;
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}
+
 /// <summary>Null/empty → Collapsed.</summary>
 public sealed class NullToCollapsedConverter : IValueConverter
 {
     public object Convert(object? value, Type targetType, object parameter, CultureInfo culture)
         => value is null || (value is string s && s.Length == 0) ? Visibility.Collapsed : Visibility.Visible;
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}
+
+/// <summary>Enum equality → Visibility (parameter = enum member name).</summary>
+public sealed class EnumToVisibilityConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object parameter, CultureInfo culture)
+        => value is not null && parameter is string name && string.Equals(value.ToString(), name, StringComparison.Ordinal)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}
+
+/// <summary>True → Visible, false → Collapsed (parameter "invert" flips).</summary>
+public sealed class BoolToVisibilityConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object parameter, CultureInfo culture)
+    {
+        bool b = value is true;
+        if (parameter is string p && p == "invert") b = !b;
+        return b ? Visibility.Visible : Visibility.Collapsed;
+    }
 
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
         => throw new NotSupportedException();

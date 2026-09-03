@@ -9,20 +9,20 @@
         MouseLeftButtonDown="OnDragWindow">
 
     <Border CornerRadius="16" Background="#F2141419" BorderThickness="1.2"
-            BorderBrush="{StaticResource Brush.GlassRim}">
+            BorderBrush="{DynamicResource Brush.GlassRim}">
         <DockPanel Margin="20,14,20,18">
             <Grid DockPanel.Dock="Top" Margin="0,0,0,10">
                 <TextBlock Text="外观设置" FontSize="16" FontWeight="SemiBold"
-                           Foreground="{StaticResource Brush.TextPrimary}"/>
+                           Foreground="{DynamicResource Brush.TextPrimary}"/>
                 <Button Content="✕" HorizontalAlignment="Right" Width="26" Height="26"
                         Background="Transparent" BorderThickness="0"
-                        Foreground="{StaticResource Brush.TextSecondary}" Cursor="Hand"
+                        Foreground="{DynamicResource Brush.TextSecondary}" Cursor="Hand"
                         Click="OnClose"/>
             </Grid>
 
             <Button DockPanel.Dock="Bottom" Content="恢复默认" Height="32" Margin="0,12,0,0"
-                    Background="{StaticResource Brush.Surface}" BorderThickness="0"
-                    Foreground="{StaticResource Brush.TextPrimary}" Cursor="Hand"
+                    Background="{DynamicResource Brush.Surface}" BorderThickness="0"
+                    Foreground="{DynamicResource Brush.TextPrimary}" Cursor="Hand"
                     Click="OnResetDefaults"/>
 
             <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -31,11 +31,11 @@
                     <TextBlock Text="背景" Style="{StaticResource Text.SectionLabel}"/>
                     <StackPanel Orientation="Horizontal" Margin="0,6,0,4">
                         <RadioButton x:Name="ModeGlass" Content="动态玻璃" Checked="OnModeChanged"
-                                     Foreground="{StaticResource Brush.TextPrimary}" Margin="0,0,14,0"/>
+                                     Foreground="{DynamicResource Brush.TextPrimary}" Margin="0,0,14,0"/>
                         <RadioButton x:Name="ModeColor" Content="纯色" Checked="OnModeChanged"
-                                     Foreground="{StaticResource Brush.TextPrimary}" Margin="0,0,14,0"/>
+                                     Foreground="{DynamicResource Brush.TextPrimary}" Margin="0,0,14,0"/>
                         <RadioButton x:Name="ModeImage" Content="图片" Checked="OnModeChanged"
-                                     Foreground="{StaticResource Brush.TextPrimary}"/>
+                                     Foreground="{DynamicResource Brush.TextPrimary}"/>
                     </StackPanel>
 
                     <!-- color picker -->
@@ -49,7 +49,7 @@
                                      Text="#1A1A22" KeyDown="OnHexKeyDown" VerticalContentAlignment="Center"/>
                             <Border x:Name="ColorPreview" Grid.Column="1" Width="34" Height="26" Margin="8,0,0,0"
                                     CornerRadius="6" Background="#1A1A22"
-                                    BorderBrush="{StaticResource Brush.Stroke}" BorderThickness="1"/>
+                                    BorderBrush="{DynamicResource Brush.Stroke}" BorderThickness="1"/>
                         </Grid>
                         <TextBlock Text="色相" Style="{StaticResource Text.SmallLabel}"/>
                         <Slider x:Name="HueSlider" Minimum="0" Maximum="360" ValueChanged="OnHsvChanged"/>
@@ -68,11 +68,11 @@
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
                             <TextBlock x:Name="ImagePathText" Grid.Column="0" Text="未选择图片"
-                                       Foreground="{StaticResource Brush.TextSecondary}" FontSize="11"
+                                       Foreground="{DynamicResource Brush.TextSecondary}" FontSize="11"
                                        TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
                             <Button Grid.Column="1" Content="选择图片…" Padding="10,4" Margin="8,0,0,0"
-                                    Background="{StaticResource Brush.Surface}" BorderThickness="0"
-                                    Foreground="{StaticResource Brush.TextPrimary}" Cursor="Hand"
+                                    Background="{DynamicResource Brush.Surface}" BorderThickness="0"
+                                    Foreground="{DynamicResource Brush.TextPrimary}" Cursor="Hand"
                                     Click="OnPickImage"/>
                         </Grid>
                         <TextBlock Text="图片暗化" Style="{StaticResource Text.SmallLabel}"/>
@@ -91,9 +91,9 @@
 
                     <TextBlock Text="光效" Style="{StaticResource Text.SectionLabel}" Margin="0,14,0,0"/>
                     <CheckBox x:Name="GlintCheck" Content="呼吸边缘光" Margin="0,6,0,2"
-                              Foreground="{StaticResource Brush.TextPrimary}" Checked="OnTuneChanged" Unchecked="OnTuneChanged"/>
+                              Foreground="{DynamicResource Brush.TextPrimary}" Checked="OnTuneChanged" Unchecked="OnTuneChanged"/>
                     <CheckBox x:Name="ChromaCheck" Content="棱边色散" Margin="0,4,0,0"
-                              Foreground="{StaticResource Brush.TextPrimary}" Checked="OnTuneChanged" Unchecked="OnTuneChanged"/>
+                              Foreground="{DynamicResource Brush.TextPrimary}" Checked="OnTuneChanged" Unchecked="OnTuneChanged"/>
                 </StackPanel>
             </ScrollViewer>
         </DockPanel>
