@@ -3,6 +3,7 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Threading;
 using WinFinger.Models;
@@ -30,6 +31,9 @@ public sealed class ClipboardStore
 
     private readonly DispatcherTimer _saveTimer;
 
+    /// <summary>串行化的落盘任务链：每次 FlushAsync 都接在上一次之后执行，避免旧快照后写覆盖新快照（乱序落盘丢数据）。</summary>
+    private Task _flushChain = Task.CompletedTask;
+
     public ClipboardStore()
     {
         // 300ms 去抖：连续多次修改只落盘一次（构造函数在 UI 线程调用，DispatcherTimer 可安全创建）。
@@ -49,6 +53,7 @@ public sealed class ClipboardStore
         var existing = Entries.FirstOrDefault(e => e.ContentHash == hash);
         if (existing is not null)
         {
+            // 去重命中只 Touch（前置 + 刷新时间戳），不会用本次的 truncated 更新既有条目的 IsTruncated。
             Touch(existing);
             return existing;
         }
@@ -272,28 +277,34 @@ public sealed class ClipboardStore
         _saveTimer.Start();
     }
 
-    /// <summary>立即同步落盘（App.OnExit 调用，确保进程退出前数据不丢）：停掉去抖计时器，快照当前条目后在后台线程写盘并等待完成。</summary>
+    /// <summary>立即同步落盘（App.OnExit 调用，确保进程退出前数据不丢）：停掉去抖计时器，
+    /// 排入落盘任务链并等待其执行完成（含之前所有排队中的写入），超过 3s 放弃等待以免退出卡死。</summary>
     public void SaveNow()
     {
         _saveTimer.Stop();
-        FlushAsync().GetAwaiter().GetResult();
+        FlushAsync().Wait(TimeSpan.FromSeconds(3));
     }
 
+    /// <summary>把本次快照接到 _flushChain 之后串行执行，避免并发写入乱序（旧快照后写覆盖新快照）。</summary>
     private Task FlushAsync()
     {
         var snapshot = Entries.ToList();
-        return Task.Run(() =>
+        _flushChain = _flushChain.ContinueWith(_ => WriteToDisk(snapshot),
+            CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
+        return _flushChain;
+    }
+
+    private static void WriteToDisk(List<ClipboardEntry> snapshot)
+    {
+        try
         {
-            try
-            {
-                StoragePaths.EnsureCreated();
-                AtomicJson.Write(StoragePaths.ClipboardJson, snapshot, JsonOptions);
-            }
-            catch
-            {
-                // best effort
-            }
-        });
+            StoragePaths.EnsureCreated();
+            AtomicJson.Write(StoragePaths.ClipboardJson, snapshot, JsonOptions);
+        }
+        catch
+        {
+            // best effort
+        }
     }
 
     public static string Hash(byte[] data) => Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant();
