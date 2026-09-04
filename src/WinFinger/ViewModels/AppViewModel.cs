@@ -152,7 +152,7 @@ public sealed partial class AppViewModel : ObservableObject
         {
             if (e.PropertyName == nameof(MediaService.IsPlaying))
             {
-                if (Media.IsPlaying) Visualizer.Start();
+                if (Media.IsPlaying && !SettingsStore.Settings.PowerSaver) Visualizer.Start();
                 else Visualizer.Stop();
             }
         };
@@ -265,15 +265,32 @@ public sealed partial class AppViewModel : ObservableObject
         else Notifications.Post("⚙️", "未配置 AI，请在托盘 → 功能设置 中填写 API Key");
     }
 
+    /// <summary>dev hook: WINFINGER_PERFTEST=metrics,foreground,media,lyrics,theme,ghost,glint 逐个关掉子系统，做 CPU 对照。</summary>
+    public static bool PerfTestOff(string subsystem)
+    {
+        string? list = Environment.GetEnvironmentVariable("WINFINGER_PERFTEST");
+        return list is not null && list.Split(',').Any(x => x.Trim().Equals(subsystem, StringComparison.OrdinalIgnoreCase));
+    }
+
     public void Start()
     {
         StoragePaths.EnsureCreated();
         Actions.Start();
-        Theme.Start(AppearanceStyle);
-        Metrics.Start();
-        ForegroundApp.Start();
-        Media.Start();
-        Lyrics.Start(Media);
+        if (!PerfTestOff("theme")) Theme.Start(AppearanceStyle);
+        if (!PerfTestOff("metrics")) Metrics.Start();
+        Metrics.SetPowerSaver(SettingsStore.Settings.PowerSaver);
+        if (!PerfTestOff("foreground")) ForegroundApp.Start();
+        if (!PerfTestOff("media")) Media.Start();
+        if (!PerfTestOff("lyrics")) Lyrics.Start(Media);
+    }
+
+    /// <summary>省电模式开关变化后调用：调整采样频率、停掉频谱（岛自身的动画由 IslandWindow.ApplyAppearance 处理）。</summary>
+    public void ApplyPowerSaver()
+    {
+        bool on = SettingsStore.Settings.PowerSaver;
+        Metrics.SetPowerSaver(on);
+        if (on) Visualizer.Stop();
+        else if (Media.IsPlaying) Visualizer.Start();
     }
 
     public void Stop()

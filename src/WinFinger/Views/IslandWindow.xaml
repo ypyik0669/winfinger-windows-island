@@ -34,7 +34,9 @@
                 <DropShadowEffect x:Name="IslandShadow" Color="#000000" BlurRadius="32" ShadowDepth="6" Direction="270" Opacity="0.35"/>
             </Border.Effect>
 
-            <Grid ClipToBounds="True">
+            <!-- 试过给这一层加 BitmapCache：动态玻璃每帧更新位图会让缓存反复失效重传，CPU 反而翻倍；
+                 加在外层 IslandBorder 上只省 6 个点，却让滚动 / 输入多一次整张纹理上传。都不值，别加。 -->
+            <Grid x:Name="IslandContent" ClipToBounds="True">
                 <!-- live frosted glass: blurred + saturation-boosted capture of what's behind -->
                 <Border x:Name="GlassLayer" IsHitTestVisible="False"
                         CornerRadius="{Binding CornerRadius, ElementName=IslandBorder}"
@@ -95,19 +97,6 @@
                 <Border x:Name="GlintB" BorderThickness="1.4" BorderBrush="{DynamicResource Brush.GlintBottomRight}"
                         CornerRadius="{Binding CornerRadius, ElementName=IslandBorder}" IsHitTestVisible="False" Opacity="0.9"/>
 
-                <!-- breathing accent border while expanded (mac BreathingBorder) -->
-                <Border x:Name="AccentBorder" BorderThickness="1.5" IsHitTestVisible="False" Opacity="0"
-                        CornerRadius="{Binding CornerRadius, ElementName=IslandBorder}">
-                    <Border.BorderBrush>
-                        <LinearGradientBrush x:Name="AccentBorderBrush" StartPoint="0,0" EndPoint="1,1">
-                            <GradientStop x:Name="AccentStop0" Color="#2038DBC7" Offset="0"/>
-                            <GradientStop x:Name="AccentStop1" Color="#E038DBC7" Offset="0.45"/>
-                            <GradientStop Color="#B8FFFFFF" Offset="0.6"/>
-                            <GradientStop x:Name="AccentStop2" Color="#7038DBC7" Offset="0.8"/>
-                            <GradientStop x:Name="AccentStop3" Color="#2038DBC7" Offset="1"/>
-                        </LinearGradientBrush>
-                    </Border.BorderBrush>
-                </Border>
 
                 <!-- sheen band swept across on expand / notification -->
                 <Border x:Name="SheenBand" Width="150" HorizontalAlignment="Left" Opacity="0"
@@ -128,6 +117,27 @@
                         Background="Transparent" Cursor="SizeNWSE" Visibility="Collapsed" ToolTip="拖动调整面板大小"
                         MouseLeftButtonDown="OnResizeDown" MouseMove="OnResizeMove" MouseLeftButtonUp="OnResizeUp"/>
             </Grid>
+        </Border>
+
+        <!-- breathing accent border while expanded (mac BreathingBorder).
+             放在 IslandBorder 外面做覆盖层：它 12fps 的脉冲如果画在阴影容器里，
+             每一帧都会逼着 32px 的 DropShadow 对整块面板重算（展开时约占一个核的 10%） -->
+        <Border x:Name="AccentBorder" BorderThickness="1.5" IsHitTestVisible="False" Opacity="0"
+                HorizontalAlignment="{Binding HorizontalAlignment, ElementName=IslandBorder}"
+                VerticalAlignment="{Binding VerticalAlignment, ElementName=IslandBorder}"
+                Margin="{Binding Margin, ElementName=IslandBorder}"
+                Width="{Binding ActualWidth, ElementName=IslandBorder}"
+                Height="{Binding ActualHeight, ElementName=IslandBorder}"
+                CornerRadius="{Binding CornerRadius, ElementName=IslandBorder}">
+            <Border.BorderBrush>
+                <LinearGradientBrush x:Name="AccentBorderBrush" StartPoint="0,0" EndPoint="1,1">
+                    <GradientStop x:Name="AccentStop0" Color="#2038DBC7" Offset="0"/>
+                    <GradientStop x:Name="AccentStop1" Color="#E038DBC7" Offset="0.45"/>
+                    <GradientStop Color="#B8FFFFFF" Offset="0.6"/>
+                    <GradientStop x:Name="AccentStop2" Color="#7038DBC7" Offset="0.8"/>
+                    <GradientStop x:Name="AccentStop3" Color="#2038DBC7" Offset="1"/>
+                </LinearGradientBrush>
+            </Border.BorderBrush>
         </Border>
     </Grid>
 </Window>

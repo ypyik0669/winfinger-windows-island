@@ -44,6 +44,18 @@ public partial class IslandWindow : Window
     // self-made frosted glass (live capture behind the island)
     private LiveGlassCapture? _glass;
     private System.Windows.Threading.DispatcherTimer? _glassTimer;
+
+    // ── 氛围动画（呼吸光 / 强调边框 / 封面辉光）统一走 UI 线程定时器 ──
+    // Opacity、画刷坐标、特效属性上的 WPF 动画是「独立动画」：由渲染线程按 60fps 插值，
+    // DesiredFrameRate 管不住；而这是个分层透明窗口，渲染线程每合成一帧都得整窗回读，
+    // 展开面板时一条强调边框就能吃掉一个核的 14%。改成 12fps 定时器直接赋值后，
+    // 渲染线程只在值真的变了时才合成。
+    private const int AmbienceFps = 12;
+    private readonly System.Windows.Threading.DispatcherTimer _ambienceTimer;
+    private readonly System.Diagnostics.Stopwatch _ambienceClock = System.Diagnostics.Stopwatch.StartNew();
+    private bool _glintsOn;
+    private bool _accentOn;
+    private bool _glowOn;
     private bool _morphing; // size animation in flight: skip captures so they don't fight for frames
     private DateTime _lastDragCapture;
 
@@ -85,7 +97,7 @@ public partial class IslandWindow : Window
             GlassBrush.ImageSource = _glass.Bitmap;
             _glassTimer = new System.Windows.Threading.DispatcherTimer
             {
-                Interval = TimeSpan.FromMilliseconds(160)
+                Interval = ActiveGlassInterval()
             };
             _glassTimer.Tick += (_, _) => CaptureGlass();
             // migrate the legacy toggle once: old "off" becomes solid-color mode
@@ -114,9 +126,15 @@ public partial class IslandWindow : Window
             Interval = TimeSpan.FromMilliseconds(150)
         };
         _ghostTimer.Tick += (_, _) => UpdateGhostState();
-        _ghostTimer.Start();
+        if (!AppViewModel.PerfTestOff("ghost")) _ghostTimer.Start();
 
-        StartGlintBreathing();
+        _ambienceTimer = new System.Windows.Threading.DispatcherTimer(System.Windows.Threading.DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(1000.0 / AmbienceFps)
+        };
+        _ambienceTimer.Tick += (_, _) => TickAmbience();
+
+        if (!AppViewModel.PerfTestOff("glint")) StartGlintBreathing();
 
         // periodic working-set trim keeps the Task Manager footprint honest for a tray-style app
         var trimTimer = new System.Windows.Threading.DispatcherTimer
@@ -267,60 +285,90 @@ public partial class IslandWindow : Window
         CaptureGlass();
     }
 
+    /// <summary>取景刷新间隔：省电模式下降到 2.5 帧/秒，玻璃看起来略有延迟但整窗回读少了一半以上。</summary>
+    private TimeSpan ActiveGlassInterval() =>
+        TimeSpan.FromMilliseconds(_model.SettingsStore.Settings.PowerSaver ? 400 : 160);
+
+    private bool PowerSaver => _model.SettingsStore.Settings.PowerSaver;
+
     /// <summary>Counter-phased opacity loops so light appears to drift around the glass rim.</summary>
     private void StartGlintBreathing()
     {
-        var breathe = new DoubleAnimation(0.2, 0.95, TimeSpan.FromSeconds(2.8))
+        var s = _model.SettingsStore.Settings;
+        _glintsOn = s.GlintEnabled && !s.PowerSaver;
+        if (!_glintsOn)
         {
-            AutoReverse = true,
-            RepeatBehavior = RepeatBehavior.Forever,
-            EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut }
-        };
-        var counter = new DoubleAnimation(0.9, 0.15, TimeSpan.FromSeconds(2.8))
+            GlintA.Opacity = 0.3;
+            GlintB.Opacity = 0.3;
+        }
+        SyncAmbienceTimer();
+    }
+
+    private void SyncAmbienceTimer()
+    {
+        bool any = _glintsOn || _accentOn || _glowOn;
+        if (any && !_ambienceTimer.IsEnabled)
         {
-            AutoReverse = true,
-            RepeatBehavior = RepeatBehavior.Forever,
-            EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut }
-        };
-        // slow ambience: no need to re-render the shadowed island subtree at 60fps
-        Timeline.SetDesiredFrameRate(breathe, 20);
-        Timeline.SetDesiredFrameRate(counter, 20);
-        GlintA.BeginAnimation(OpacityProperty, breathe);
-        GlintB.BeginAnimation(OpacityProperty, counter);
+            _ambienceTimer.Start();
+            TickAmbience();
+        }
+        else if (!any)
+        {
+            _ambienceTimer.Stop();
+        }
+    }
+
+    /// <summary>0→1→0 往返 + SineEase InOut：对应原来 AutoReverse + Forever 的 DoubleAnimation。</summary>
+    private static double Breathe(double seconds, double period)
+    {
+        double u = (seconds / period) % 2.0;
+        if (u > 1) u = 2 - u;
+        return 0.5 - 0.5 * Math.Cos(Math.PI * u);
+    }
+
+    private static double Lerp(double a, double b, double t) => a + (b - a) * t;
+
+    private void TickAmbience()
+    {
+        double t = _ambienceClock.Elapsed.TotalSeconds;
+        if (_glintsOn)
+        {
+            double k = Breathe(t, 2.8);
+            GlintA.Opacity = Lerp(0.2, 0.95, k);
+            GlintB.Opacity = Lerp(0.9, 0.15, k); // 反相：光像是绕着玻璃边缘游走
+        }
+        if (_accentOn)
+        {
+            AccentBorder.Opacity = Lerp(0.5, 1.0, Breathe(t, 1.6));
+            double d = Breathe(t, 6);
+            AccentBorderBrush.StartPoint = new Point(d, d);
+        }
+        if (_glowOn) IslandShadow.Opacity = Lerp(0.45, 0.85, Breathe(t, 1.6));
     }
 
     /// <summary>mac BreathingBorder: accent-tinted stroke that pulses (1.6s) and drifts while expanded.</summary>
     private void StartAccentBorder()
     {
+        if (PowerSaver || AppViewModel.PerfTestOff("accent"))
+        {
+            StopAccentBorder();
+            return;
+        }
         var accent = _model.Media.HasSession ? _model.Media.AccentColor
             : (TryFindResource("Brush.Teal") as SolidColorBrush)?.Color ?? Colors.Teal;
         AccentStop0.Color = Color.FromArgb(0x20, accent.R, accent.G, accent.B);
         AccentStop1.Color = Color.FromArgb(0xE0, accent.R, accent.G, accent.B);
         AccentStop2.Color = Color.FromArgb(0x70, accent.R, accent.G, accent.B);
         AccentStop3.Color = Color.FromArgb(0x20, accent.R, accent.G, accent.B);
-        var pulse = new DoubleAnimation(0.5, 1.0, TimeSpan.FromSeconds(1.6))
-        {
-            AutoReverse = true,
-            RepeatBehavior = RepeatBehavior.Forever,
-            EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut }
-        };
-        var drift = new PointAnimation(new Point(0, 0), new Point(1, 1), TimeSpan.FromSeconds(6))
-        {
-            AutoReverse = true,
-            RepeatBehavior = RepeatBehavior.Forever,
-            EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut }
-        };
-        Timeline.SetDesiredFrameRate(pulse, 20);
-        Timeline.SetDesiredFrameRate(drift, 20);
-        AccentBorder.BeginAnimation(OpacityProperty, pulse);
-        AccentBorderBrush.BeginAnimation(LinearGradientBrush.StartPointProperty, drift);
+        _accentOn = true;
+        SyncAmbienceTimer();
     }
 
     private void StopAccentBorder()
     {
-        AccentBorder.BeginAnimation(OpacityProperty, null);
-        AccentBorderBrush.BeginAnimation(LinearGradientBrush.StartPointProperty, null);
+        _accentOn = false;
         AccentBorder.Opacity = 0;
+        SyncAmbienceTimer();
     }
 
     // ── Ghost mode: far cursor → translucent + click-through, near cursor → solid ──
@@ -372,15 +420,15 @@ public partial class IslandWindow : Window
         // but keep a slow glass refresh so the background never goes stale behind a new scene
         if (ghosted)
         {
-            GlintA.BeginAnimation(OpacityProperty, null);
-            GlintB.BeginAnimation(OpacityProperty, null);
+            _glintsOn = false;
             GlintA.Opacity = 0.3;
             GlintB.Opacity = 0.3;
+            SyncAmbienceTimer();
             if (_glassTimer is not null) _glassTimer.Interval = TimeSpan.FromMilliseconds(1200);
         }
         else
         {
-            if (_glassTimer is not null) _glassTimer.Interval = TimeSpan.FromMilliseconds(160);
+            if (_glassTimer is not null) _glassTimer.Interval = ActiveGlassInterval();
             StartGlintBreathing();
             CaptureGlass();
         }
@@ -437,9 +485,12 @@ public partial class IslandWindow : Window
         ImageDimLayer.Opacity = _model.Theme.IsDark ? Math.Min(0.9, imageDim + extraDark) : imageDim * 0.5;
         if (_glass is not null) _glass.Saturation = s.GlassSaturation;
         ChromaticLayer.Visibility = s.ChromaticEnabled ? Visibility.Visible : Visibility.Collapsed;
-        bool glints = s.GlintEnabled;
+        bool glints = s.GlintEnabled && !s.PowerSaver;
         GlintA.Visibility = glints ? Visibility.Visible : Visibility.Collapsed;
         GlintB.Visibility = glints ? Visibility.Visible : Visibility.Collapsed;
+        if (!_ghosted) StartGlintBreathing(); // 关了就停时钟、开了就重新起，不只是藏起来
+        if (_glassTimer is not null && !_ghosted) _glassTimer.Interval = ActiveGlassInterval();
+        if (_model.IsExpanded) StartAccentBorder(); // 省电切换时立即停 / 起强调边框
         // if the island is currently ghosted, reflect a changed fade opacity immediately
         if (_ghosted)
             IslandBorder.BeginAnimation(OpacityProperty,
@@ -483,7 +534,7 @@ public partial class IslandWindow : Window
     /// <summary>One glass frame: grab what's behind IslandBorder (device px) into the ImageBrush.</summary>
     private void CaptureGlass()
     {
-        if (_glass is null || !IslandBorder.IsLoaded || _morphing) return;
+        if (_glass is null || !IslandBorder.IsLoaded || _morphing || AppViewModel.PerfTestOff("glass")) return;
         if (_model.AppearanceStyle == "black" || _model.SettingsStore.Settings.BackgroundMode != "glass") return;
         try
         {
@@ -519,17 +570,16 @@ public partial class IslandWindow : Window
             TintLayer.BeginAnimation(OpacityProperty, new DoubleAnimation(0.12, TimeSpan.FromMilliseconds(600)));
             IslandShadow.BeginAnimation(System.Windows.Media.Effects.DropShadowEffect.ColorProperty,
                 new ColorAnimation(_model.Media.AccentColor, TimeSpan.FromMilliseconds(600)));
-            var pulse = new DoubleAnimation(0.45, 0.85, TimeSpan.FromMilliseconds(1600))
-            {
-                AutoReverse = true,
-                RepeatBehavior = RepeatBehavior.Forever,
-                EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut }
-            };
-            Timeline.SetDesiredFrameRate(pulse, 20);
-            IslandShadow.BeginAnimation(System.Windows.Media.Effects.DropShadowEffect.OpacityProperty, pulse);
+            // 阴影脉冲交给氛围定时器；省电模式保留封面色调、不脉冲
+            IslandShadow.BeginAnimation(System.Windows.Media.Effects.DropShadowEffect.OpacityProperty, null);
+            _glowOn = !PowerSaver;
+            if (!_glowOn) IslandShadow.Opacity = 0.6;
+            SyncAmbienceTimer();
         }
         else
         {
+            _glowOn = false;
+            SyncAmbienceTimer();
             TintLayer.BeginAnimation(OpacityProperty, new DoubleAnimation(0, TimeSpan.FromMilliseconds(600)));
             IslandShadow.BeginAnimation(System.Windows.Media.Effects.DropShadowEffect.ColorProperty,
                 new ColorAnimation(Colors.Black, TimeSpan.FromMilliseconds(600)));

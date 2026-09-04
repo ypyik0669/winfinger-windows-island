@@ -94,6 +94,12 @@
                               Foreground="{DynamicResource Brush.TextPrimary}" Checked="OnTuneChanged" Unchecked="OnTuneChanged"/>
                     <CheckBox x:Name="ChromaCheck" Content="棱边色散" Margin="0,4,0,0"
                               Foreground="{DynamicResource Brush.TextPrimary}" Checked="OnTuneChanged" Unchecked="OnTuneChanged"/>
+
+                    <TextBlock Text="性能" Style="{StaticResource Text.SectionLabel}" Margin="0,14,0,0"/>
+                    <CheckBox x:Name="PowerSaverCheck" Content="省电模式（低配电脑）" Margin="0,6,0,2"
+                              Foreground="{DynamicResource Brush.TextPrimary}" Checked="OnTuneChanged" Unchecked="OnTuneChanged"
+                              ToolTip="关闭呼吸光、强调边框脉冲、封面辉光与频谱，网速 / 内存改为 2 秒一采，动态玻璃取景降到 2.5 帧/秒"/>
+                    <TextBlock Text="待机 CPU 可再降一半以上；想更省就把背景切成「纯色」" Style="{StaticResource Text.SmallLabel}"/>
                 </StackPanel>
             </ScrollViewer>
         </DockPanel>

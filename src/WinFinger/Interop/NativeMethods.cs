@@ -178,6 +178,30 @@ internal static class NativeMethods
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool GlobalMemoryStatusEx(ref MEMORYSTATUSEX lpBuffer);
 
+    // ── 网卡流量：GetIfTable2 一次拿全部接口的字节计数（微秒级）。
+    //    NetworkInterface.GetAllNetworkInterfaces() 每次要走 GetAdaptersAddresses + 大量托管分配，
+    //    机器上虚拟网卡多的时候单次 100ms 以上，每秒调一次等于常驻吃掉一成 CPU 还卡 UI 线程。
+    [DllImport("iphlpapi.dll")]
+    public static extern int GetIfTable2(out IntPtr table);
+
+    [DllImport("iphlpapi.dll")]
+    public static extern void FreeMibTable(IntPtr table);
+
+    /// <summary>MIB_IF_TABLE2 / MIB_IF_ROW2 的布局常量（x64，sizeof(MIB_IF_ROW2) = 1352）。</summary>
+    public static class MibIfRow2
+    {
+        public const int TableHeaderSize = 8;      // ULONG NumEntries + 对齐到 8
+        public const int Size = 1352;
+        public const int TypeOffset = 1128;        // IFTYPE
+        public const int FlagsOffset = 1152;       // InterfaceAndOperStatusFlags（位域，1 字节）
+        public const int OperStatusOffset = 1156;  // IF_OPER_STATUS
+        public const int InOctetsOffset = 1208;
+        public const int OutOctetsOffset = 1280;
+        public const int IfTypeSoftwareLoopback = 24;
+        public const int IfOperStatusUp = 1;
+        public const byte FlagFilterInterface = 0x02; // 过滤驱动的镜像接口，会把同一份流量再算一遍
+    }
+
     // ── Foreground window / WinEvent hook ──
     public const uint EVENT_SYSTEM_FOREGROUND = 0x0003;
     public const uint WINEVENT_OUTOFCONTEXT = 0x0000;

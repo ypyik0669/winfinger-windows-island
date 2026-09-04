@@ -25,6 +25,9 @@ public sealed class AppSettings
     public bool GlintEnabled { get; set; } = true;
     public bool ChromaticEnabled { get; set; } = true;
 
+    /// <summary>省电模式：关掉所有持续动画与频谱，降低采样 / 取景频率。给低配电脑用。</summary>
+    public bool PowerSaver { get; set; }
+
     // ── parity with mac 1.1.0 ──
     /// <summary>"black" = 纯黑 (always dark), "glass" = Liquid Glass (follows system light/dark).</summary>
     public string AppearanceStyle { get; set; } = "glass";

@@ -53,6 +53,7 @@ public partial class AppearanceWindow : Window
         GhostSlider.Value = S.GhostOpacity;
         GlintCheck.IsChecked = S.GlintEnabled;
         ChromaCheck.IsChecked = S.ChromaticEnabled;
+        PowerSaverCheck.IsChecked = S.PowerSaver;
         UpdatePanelVisibility();
         _loading = false;
     }
@@ -151,6 +152,7 @@ public partial class AppearanceWindow : Window
         S.GhostOpacity = GhostSlider.Value;
         S.GlintEnabled = GlintCheck.IsChecked == true;
         S.ChromaticEnabled = ChromaCheck.IsChecked == true;
+        S.PowerSaver = PowerSaverCheck.IsChecked == true;
         SaveAndApply();
     }
 
@@ -190,6 +192,7 @@ public partial class AppearanceWindow : Window
     private void SaveAndApply()
     {
         _island.ApplyBackground();
+        _model.ApplyPowerSaver();
         _savePending = true;
         _saveTimer.Stop();
         _saveTimer.Start();

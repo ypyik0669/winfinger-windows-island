@@ -41,25 +41,13 @@ public sealed partial class MetricsService : ObservableObject
 
     public void Stop() => _timer.Stop();
 
+    /// <summary>省电模式下两秒采一次：每次采样都可能带来一次整窗重绘，频率减半开销就减半。</summary>
+    public void SetPowerSaver(bool on) => _timer.Interval = TimeSpan.FromSeconds(on ? 2 : 1);
+
     private void Sample()
     {
-        long received = 0, sent = 0;
-        try
-        {
-            foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
-            {
-                if (nic.OperationalStatus != OperationalStatus.Up) continue;
-                if (nic.NetworkInterfaceType == NetworkInterfaceType.Loopback) continue;
-                var stats = nic.GetIPStatistics();
-                received += stats.BytesReceived;
-                sent += stats.BytesSent;
-            }
-        }
-        catch
-        {
-            // Interface enumeration can transiently fail (adapter change); skip this tick.
-            return;
-        }
+        if (!TryReadNetworkTotals(out long received, out long sent))
+            return; // 瞬时失败（网卡正在增删）：跳过这一拍
 
         var now = DateTime.UtcNow;
         if (_hasBaseline)
@@ -78,13 +66,49 @@ public sealed partial class MetricsService : ObservableObject
         {
             // ullAvailPhys already counts standby (cache) pages as available → "in use" excludes reclaimable cache
             double ratio = (status.ullTotalPhys - status.ullAvailPhys) / (double)status.ullTotalPhys;
-            MemoryUsedRatio = Math.Clamp(ratio, 0, 1);
-            MemoryLoadPercent = (int)Math.Round(MemoryUsedRatio * 100);
+            MemoryLoadPercent = (int)Math.Round(Math.Clamp(ratio, 0, 1) * 100);
+            // 量化到整数百分比再发布：原始比例每秒都有微小变化，内存环每秒都会跑一次 200ms 动画，
+            // 而这个透明分层窗口每一帧都要整窗回读，一秒十几帧就是待机时最大的 CPU 开销
+            MemoryUsedRatio = MemoryLoadPercent / 100.0;
         }
 
         DownloadText = CompactBytesPerSecond(DownloadBytesPerSecond);
         UploadText = CompactBytesPerSecond(UploadBytesPerSecond);
         MemoryText = $"{MemoryLoadPercent}%";
+    }
+
+    /// <summary>
+    /// 全部「已连接、非回环、非过滤镜像」接口的累计收发字节。走 GetIfTable2，一次调用几十微秒；
+    /// 口径与 NetworkInterface.GetAllNetworkInterfaces() 一致（后者就是这张表去掉过滤接口后的视图）。
+    /// </summary>
+    public static bool TryReadNetworkTotals(out long received, out long sent)
+    {
+        received = 0;
+        sent = 0;
+        IntPtr table = IntPtr.Zero;
+        try
+        {
+            if (NativeMethods.GetIfTable2(out table) != 0 || table == IntPtr.Zero) return false;
+            int count = System.Runtime.InteropServices.Marshal.ReadInt32(table);
+            for (int i = 0; i < count; i++)
+            {
+                IntPtr row = table + NativeMethods.MibIfRow2.TableHeaderSize + i * NativeMethods.MibIfRow2.Size;
+                if (System.Runtime.InteropServices.Marshal.ReadInt32(row, NativeMethods.MibIfRow2.OperStatusOffset) != NativeMethods.MibIfRow2.IfOperStatusUp) continue;
+                if (System.Runtime.InteropServices.Marshal.ReadInt32(row, NativeMethods.MibIfRow2.TypeOffset) == NativeMethods.MibIfRow2.IfTypeSoftwareLoopback) continue;
+                if ((System.Runtime.InteropServices.Marshal.ReadByte(row, NativeMethods.MibIfRow2.FlagsOffset) & NativeMethods.MibIfRow2.FlagFilterInterface) != 0) continue;
+                received += System.Runtime.InteropServices.Marshal.ReadInt64(row, NativeMethods.MibIfRow2.InOctetsOffset);
+                sent += System.Runtime.InteropServices.Marshal.ReadInt64(row, NativeMethods.MibIfRow2.OutOctetsOffset);
+            }
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+        finally
+        {
+            if (table != IntPtr.Zero) NativeMethods.FreeMibTable(table);
+        }
     }
 
     /// <summary>mac MacFingerMetricFormatter.bytesPerSecond: "0 B/s", "12.34 KB/s", "2.1 MB/s", "120 MB/s".</summary>
