@@ -188,6 +188,7 @@ public partial class ChatPage : UserControl, IIslandPage
     {
         bool hasSessions = _model?.Chat.Sessions.Count > 0;
         ListEmptyHint.Visibility = hasSessions ? Visibility.Collapsed : Visibility.Visible;
+        if (_model?.Chat.LoadFailed == true) ListEmptyHint.Text = "历史读取失败，已留备份";
 
         bool hasMessages = _current?.Messages.Count > 0;
         EmptyPane.Visibility = hasMessages ? Visibility.Collapsed : Visibility.Visible;
@@ -267,6 +268,9 @@ public partial class ChatPage : UserControl, IIslandPage
 
         string text = Composer.Text.Trim();
         if (text.Length == 0) return;
+        // 同时只跑一条流：在别的会话正在生成时发送，会把那边掐掉。掐可以，但得说一声
+        if (_model.ChatStream.IsStreaming && !CurrentIsStreaming())
+            _model.Notifications.Post("🤖", "已停止另一个会话的生成");
         var session = EnsureSession();
         Composer.Clear();
         _stickToBottom = true;
@@ -354,7 +358,6 @@ public partial class ChatPage : UserControl, IIslandPage
         if (_modelMenu is { IsOpen: true } previous) previous.IsOpen = false;
 
         var menu = new ContextMenu { PlacementTarget = ModelChip, Placement = PlacementMode.Bottom };
-        string current = CurrentModel();
         var cfg = _model.SettingsStore.Settings;
         string fallback = string.IsNullOrWhiteSpace(cfg.ChatModel) ? cfg.AiModel : cfg.ChatModel;
 
@@ -362,7 +365,8 @@ public partial class ChatPage : UserControl, IIslandPage
         if (_models.Count > 0)
         {
             menu.Items.Add(new Separator());
-            foreach (string id in _models) AddModelItem(menu, id, id, id == current);
+            // 只勾本会话明确选过的那个；跟随设置时勾的是上面那行，别两行同时打勾
+            foreach (string id in _models) AddModelItem(menu, id, id, id == _current?.Model);
         }
         menu.Items.Add(new Separator());
         var refresh = new MenuItem

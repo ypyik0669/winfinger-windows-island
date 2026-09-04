@@ -142,12 +142,12 @@ public sealed class ChatService
         }
 
         string text = run.Snapshot();
-        // 跟「上次刷出去的长度」比，而不是跟消息现在的长度比：超长回复被 TrimForStorage
-        // 截过之后两者永远不等，会每 5s 在截断版和完整版之间来回跳
+        // 界面上也按落盘口径截断：否则超过上限后这里写完整版、5s 一次的检查点写截断版，
+        // 气泡里的「（已截断）」会一闪一闪，markdown 还得整篇重解析两次
         if (text.Length != run.FlushedLength)
         {
             run.FlushedLength = text.Length;
-            run.Message.Content = text;
+            run.Message.Content = ChatStore.TrimForStorage(text, out _);
             StateChanged?.Invoke();
         }
 

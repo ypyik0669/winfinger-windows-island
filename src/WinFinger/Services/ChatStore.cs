@@ -51,6 +51,9 @@ public sealed class ChatStore
     /// <summary>载入时读文件失败过：第一次写盘前先把旧文件复制一份，别把历史直接覆盖没了。</summary>
     private bool _backupBeforeWrite;
 
+    /// <summary>本次启动读 chat.json 失败（文件被占用等）：界面据此提示，别让用户以为历史没了。</summary>
+    public bool LoadFailed { get; private set; }
+
     public ChatStore()
     {
         // 构造在 UI 线程（AppViewModel 字段初始化），DispatcherTimer 可安全创建
@@ -291,8 +294,11 @@ public sealed class ChatStore
             foreach (var session in sessions.OrderByDescending(s => s.UpdatedAt))
             {
                 RestoreInterrupted(session);
+                TrimMessages(session);
                 Sessions.Add(session);
             }
+            // 老版本 / 手改 / 恢复的备份可能超上限，不收的话每次去抖落盘都要深拷贝一大坨
+            TrimSessions();
         }
         catch (Exception ex) when (AtomicJson.IsCorruptionError(ex))
         {
@@ -304,6 +310,7 @@ public sealed class ChatStore
             // 瞬时 I/O 失败（杀软/备份正占着文件）：内容大概率是好的，但内存里现在是空的，
             // 接下来任何一次 Save 都会把整份历史覆盖掉。标记一下，首次写盘前先留个 .bak。
             _backupBeforeWrite = true;
+            LoadFailed = true;
         }
     }
 
@@ -365,7 +372,9 @@ public sealed class ChatStore
             StoragePaths.EnsureCreated();
             if (backupFirst && File.Exists(StoragePaths.ChatJson))
             {
-                try { File.Copy(StoragePaths.ChatJson, StoragePaths.ChatJson + ".bak", overwrite: true); }
+                // 带时间戳：连续两次启动都读失败时，第二次的空文件不能覆盖掉第一次备份的好文件
+                string backup = $"{StoragePaths.ChatJson}.{DateTime.Now:yyyyMMdd-HHmmss}.bak";
+                try { File.Copy(StoragePaths.ChatJson, backup, overwrite: false); }
                 catch { /* best effort */ }
             }
             AtomicJson.Write(StoragePaths.ChatJson, archive, JsonOptions);

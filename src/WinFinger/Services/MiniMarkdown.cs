@@ -485,6 +485,7 @@ public static class MiniMarkdown
             }
 
             if ((c == '*' || c == '_') && i + 1 < n && text[i + 1] == c
+                && i + 2 < n && !char.IsWhiteSpace(text[i + 2])
                 && !(c == '_' && i > 0 && IsWordChar(text[i - 1])))
             {
                 int close = IndexOfDouble(text, i + 2, c);
@@ -556,13 +557,16 @@ public static class MiniMarkdown
 
     private static bool IsEscapable(char c) => c is '*' or '`' or '_' or '\\';
 
-    /// <summary>从 start 开始找下一个"**"（两个连续的星号）出现的位置，找不到返回 -1。</summary>
-    /// <summary>找配对的双标记（** 或 __）；__ 同样只认词边界，别把 foo__bar__baz 当成粗体。</summary>
+    /// <summary>
+    /// 找配对的双标记（** 或 __）：闭标记前不能是空白（"2 ** 3 ... 4 ** 5" 里的乘方不该配成粗体），
+    /// __ 同样只认词边界，别把 foo__bar__baz 当成粗体。
+    /// </summary>
     private static int IndexOfDouble(string s, int start, char marker)
     {
         for (int k = start; k < s.Length - 1; k++)
         {
             if (s[k] != marker || s[k + 1] != marker) continue;
+            if (k > 0 && char.IsWhiteSpace(s[k - 1])) continue;
             if (marker == '_' && k + 2 < s.Length && IsWordChar(s[k + 2])) continue;
             return k;
         }

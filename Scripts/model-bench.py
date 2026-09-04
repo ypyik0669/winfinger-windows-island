@@ -16,6 +16,7 @@ HumanEval / SciCode 风格），全部本地自动判分——不是复刻官方
 
 import argparse
 import json
+import math
 import os
 import re
 import subprocess
@@ -148,13 +149,14 @@ def grade_number(reply: str, expected: float) -> bool:
 
 
 def extract_code(reply: str) -> str:
-    fenced = re.findall(r"```(?:python)?\s*\n(.*?)```", reply, re.S)
+    # 围栏语言标签写法五花八门（py / Python / python3）：只要求"反引号 + 可选标签 + 换行"
+    fenced = re.findall(r"```[^\n`]*\n(.*?)```", reply, re.S)
     return fenced[0] if fenced else reply
 
 
-def grade_code(reply: str, asserts: list[str], allow_exec: bool) -> tuple[bool, str]:
+def grade_code(reply: str, asserts: list[str], allow_exec: bool) -> tuple[bool | None, str]:
     if not allow_exec:
-        return False, "skipped (--no-exec)"
+        return None, "skipped (--no-exec)"  # None = 不计入通过率
     source = extract_code(reply) + "\n\n" + "\n".join(asserts) + "\nprint('OK')\n"
     with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False, encoding="utf-8") as handle:
         handle.write(source)
@@ -247,6 +249,7 @@ def main() -> int:
     print("-" * 96)
 
     passed = 0
+    skipped = 0
     latencies: list[float] = []
     first_tokens: list[float] = []
     speeds: list[float] = []
@@ -273,21 +276,30 @@ def main() -> int:
         else:
             ok, note = grade_code(reply, expected, allow_exec=not args.no_exec)
 
-        passed += 1 if ok else 0
+        if ok is None:
+            skipped += 1
+        else:
+            passed += 1 if ok else 0
         latencies.append(total)
         if stream:
             first_tokens.append(ttft)
             if total > ttft > 0:
-                speeds.append(len(reply) / total)
-        print(f"{item['id']:<22}{item['family']:<22}{('PASS' if ok else 'FAIL'):<6}"
+                speeds.append(len(reply) / (total - ttft))  # 吞吐不含首字等待
+        verdict = "SKIP" if ok is None else ("PASS" if ok else "FAIL")
+        print(f"{item['id']:<22}{item['family']:<22}{verdict:<6}"
               f"{ttft:>8.2f}{total:>10.2f}  {note}")
 
     print("-" * 96)
-    scored = len(latencies)
-    print(f"通过 {passed}/{scored}" + (f"（另有 {len(items) - scored} 题请求失败）" if scored < len(items) else ""))
+    scored = len(latencies) - skipped
+    tail = []
+    if skipped:
+        tail.append(f"跳过 {skipped} 题")
+    if len(latencies) < len(items):
+        tail.append(f"{len(items) - len(latencies)} 题请求失败")
+    print(f"通过 {passed}/{scored}" + (f"（{'，'.join(tail)}）" if tail else ""))
     if latencies:
         ordered = sorted(latencies)
-        p95 = ordered[max(0, int(len(ordered) * 0.95) - 1)]
+        p95 = ordered[min(len(ordered) - 1, max(0, math.ceil(len(ordered) * 0.95) - 1))]
         print(f"总耗时 平均 {sum(latencies) / len(latencies):.2f}s · 中位 {ordered[len(ordered) // 2]:.2f}s · p95 {p95:.2f}s")
     if first_tokens:
         print(f"首字延迟 平均 {sum(first_tokens) / len(first_tokens):.2f}s · 最快 {min(first_tokens):.2f}s")

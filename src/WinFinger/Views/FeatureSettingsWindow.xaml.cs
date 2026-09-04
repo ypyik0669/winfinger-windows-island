@@ -32,6 +32,7 @@ public partial class FeatureSettingsWindow : Window
     private readonly AppViewModel _model;
     private readonly IslandWindow _island;
     private CancellationTokenSource? _testCts;
+    private CancellationTokenSource? _fetchCts;
     private bool _loading = true;
     private bool _closed;
 
@@ -41,11 +42,31 @@ public partial class FeatureSettingsWindow : Window
         _island = island;
         InitializeComponent();
         _model.Actions.Changed += OnActionsChanged;
+        _model.SettingsStore.Changed += OnSettingsChanged;
         Closed += OnWindowClosed;
         LoadFromSettings(); // 结尾会把 _loading 放掉
     }
 
     private AppSettings S => _model.SettingsStore.Settings;
+
+    /// <summary>
+    /// 别处改了设置（对话页的模型胶囊会写「对话模型」）：把两个模型框同步过来，
+    /// 否则窗口开着时选的模型会被这里失焦提交的旧值冲掉。
+    /// </summary>
+    private void OnSettingsChanged()
+    {
+        if (_closed || _loading) return;
+        _loading = true;
+        try
+        {
+            if (!ChatModelBox.IsKeyboardFocusWithin) ChatModelBox.Text = S.ChatModel;
+            if (!ModelCombo.IsKeyboardFocusWithin) ModelCombo.Text = S.AiModel ?? "";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
 
     // ── 载入 ──
 
@@ -237,12 +258,19 @@ public partial class FeatureSettingsWindow : Window
     /// </summary>
     private async void OnFetchModels(object sender, RoutedEventArgs e)
     {
+        _fetchCts?.Cancel();
+        _fetchCts?.Dispose();
+        var cts = new CancellationTokenSource();
+        _fetchCts = cts;
         FetchModelsButton.IsEnabled = false;
         string original = (string)FetchModelsButton.Content;
         FetchModelsButton.Content = "获取中…";
         try
         {
-            var models = await _model.Ai.ListModelsAsync(CancellationToken.None);
+            IReadOnlyList<string> models;
+            try { models = await _model.Ai.ListModelsAsync(cts.Token); }
+            catch (OperationCanceledException) { return; }
+            if (_closed || cts.IsCancellationRequested) return; // 窗口已经关了，别再弹提示改控件
             if (models.Count == 0)
             {
                 _model.Notifications.Post("🤖", "没能获取模型列表，检查接口地址和 Key");
@@ -416,6 +444,10 @@ public partial class FeatureSettingsWindow : Window
     {
         _closed = true;
         _model.Actions.Changed -= OnActionsChanged;
+        _model.SettingsStore.Changed -= OnSettingsChanged;
+        _fetchCts?.Cancel();
+        _fetchCts?.Dispose();
+        _fetchCts = null;
         _testCts?.Cancel();
         _testCts?.Dispose();
         _testCts = null;

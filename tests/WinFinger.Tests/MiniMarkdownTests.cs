@@ -498,6 +498,16 @@ public class MiniMarkdownTests
         Assert.Equal(MdSpanKind.Text, span.Kind);
     }
 
+    [Theory]
+    [InlineData("2 ** 3 and 4 ** 5")]
+    [InlineData("x ** y ** z")]
+    [InlineData("a __ b __ c")]
+    public void ParseInline_DoubleMarkersAcrossWhitespace_StayLiteral(string input)
+    {
+        var span = Assert.Single(MiniMarkdown.ParseInline(input));
+        Assert.Equal(new MdSpan(MdSpanKind.Text, input), span);
+    }
+
     [Fact]
     public void ParseInline_DoubleUnderscore_IsBold()
     {
